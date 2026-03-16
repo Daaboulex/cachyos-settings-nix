@@ -235,7 +235,7 @@ in
         '';
 
         boot.extraModprobeConfig = ''
-          options nvidia NVreg_UsePageAttributeTable=1 NVreg_InitializeSystemMemoryAllocations=0 NVreg_RegistryDwords=RmEnableAggressiveVblank=1 NVreg_DynamicPowerManagement=0x02 NVreg_EnableS0ixPowerManagement=1
+          options nvidia NVreg_UsePageAttributeTable=1 NVreg_InitializeSystemMemoryAllocations=0 NVreg_DynamicPowerManagement=0x02 NVreg_EnableS0ixPowerManagement=1
         '';
       })
 
