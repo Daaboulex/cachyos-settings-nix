@@ -32,12 +32,15 @@
 
       formatter = forAllSystems ({ pkgs, ... }: pkgs.nixfmt-rfc-style);
 
-      checks = forAllSystems ({ system, ... }: {
-        pre-commit-check = git-hooks.lib.${system}.run {
-          src = self;
-          hooks.nixfmt-rfc-style.enable = true;
-        };
-      });
+      checks = forAllSystems (
+        { system, ... }:
+        {
+          pre-commit-check = git-hooks.lib.${system}.run {
+            src = self;
+            hooks.nixfmt-rfc-style.enable = true;
+          };
+        }
+      );
 
       devShells = forAllSystems (
         { pkgs, system }:
