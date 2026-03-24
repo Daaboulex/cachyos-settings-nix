@@ -227,7 +227,7 @@ VERIFY_CHECK=$(echo "$CONFIG" | jq -r '.verify.check // empty')
 if [ -n "$VERIFY_BINARY" ]; then
   log "Step 3/4: Binary verification (./result/bin/$VERIFY_BINARY $VERIFY_ARGS)"
   nix build .#default  # need result symlink
-  if ! ./result/bin/"$VERIFY_BINARY" $VERIFY_ARGS 2>&1; then
+  if ! ./result/bin/"$VERIFY_BINARY" "$VERIFY_ARGS" 2>&1; then
     err "Binary verification failed"
     output "error_type" "verification-error"
     exit 1
