@@ -1,2 +1,8 @@
 result
 .direnv
+
+# AI tracking (local only)
+AI-progress.json
+AI-tasks.json
+result-*
+.envrc
