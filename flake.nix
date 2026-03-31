@@ -30,14 +30,14 @@
     {
       nixosModules.default = import ./module.nix;
 
-      formatter = forAllSystems ({ pkgs, ... }: pkgs.nixfmt-rfc-style);
+      formatter = forAllSystems ({ pkgs, ... }: pkgs.nixfmt);
 
       checks = forAllSystems (
         { system, ... }:
         {
           pre-commit-check = git-hooks.lib.${system}.run {
             src = self;
-            hooks.nixfmt-rfc-style.enable = true;
+            hooks.nixfmt.enable = true;
           };
         }
       );
