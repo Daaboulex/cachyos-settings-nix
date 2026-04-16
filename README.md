@@ -1,6 +1,11 @@
 # cachyos-settings-nix
 
 [![CI](https://github.com/Daaboulex/cachyos-settings-nix/actions/workflows/ci.yml/badge.svg)](https://github.com/Daaboulex/cachyos-settings-nix/actions/workflows/ci.yml)
+[![License](https://img.shields.io/github/license/Daaboulex/cachyos-settings-nix)](./LICENSE)
+[![NixOS](https://img.shields.io/badge/NixOS-unstable-78C0E8?logo=nixos&logoColor=white)](https://nixos.org)
+[![Last commit](https://img.shields.io/github/last-commit/Daaboulex/cachyos-settings-nix)](https://github.com/Daaboulex/cachyos-settings-nix/commits)
+[![Stars](https://img.shields.io/github/stars/Daaboulex/cachyos-settings-nix?style=flat)](https://github.com/Daaboulex/cachyos-settings-nix/stargazers)
+[![Issues](https://img.shields.io/github/issues/Daaboulex/cachyos-settings-nix)](https://github.com/Daaboulex/cachyos-settings-nix/issues)
 
 [CachyOS-Settings](https://github.com/CachyOS/CachyOS-Settings) ported as a standalone NixOS module.
 
