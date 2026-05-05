@@ -1,23 +1,21 @@
 # cachyos-settings-nix
 
-[![CI](https://github.com/Daaboulex/cachyos-settings-nix/actions/workflows/ci.yml/badge.svg)](https://github.com/Daaboulex/cachyos-settings-nix/actions/workflows/ci.yml)
-[![License](https://img.shields.io/github/license/Daaboulex/cachyos-settings-nix)](./LICENSE)
-[![NixOS](https://img.shields.io/badge/NixOS-unstable-78C0E8?logo=nixos&logoColor=white)](https://nixos.org)
-[![Last commit](https://img.shields.io/github/last-commit/Daaboulex/cachyos-settings-nix)](https://github.com/Daaboulex/cachyos-settings-nix/commits)
-[![Stars](https://img.shields.io/github/stars/Daaboulex/cachyos-settings-nix?style=flat)](https://github.com/Daaboulex/cachyos-settings-nix/stargazers)
-[![Issues](https://img.shields.io/github/issues/Daaboulex/cachyos-settings-nix)](https://github.com/Daaboulex/cachyos-settings-nix/issues)
+<!-- BEGIN generated:badges -->
+[![NixOS unstable](https://img.shields.io/badge/NixOS-unstable-78C0E8?logo=nixos&logoColor=white)](https://nixos.org)
+[![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](./LICENSE)
+<!-- END generated:badges -->
 
 [CachyOS-Settings](https://github.com/CachyOS/CachyOS-Settings) ported as a standalone NixOS module.
 
+<!-- BEGIN generated:upstream -->
 ## Upstream
 
-This is a **NixOS port** — not the original project. All credit for CachyOS-Settings goes to:
-
-- **Project**: [CachyOS](https://cachyos.org)
-- **Repository**: [github.com/CachyOS/CachyOS-Settings](https://github.com/CachyOS/CachyOS-Settings)
-- **License**: [GPL-3.0](https://github.com/CachyOS/CachyOS-Settings/blob/master/LICENSE)
-
-The upstream repo ships sysctl/udev/systemd files for Arch-derivative distros. This flake re-expresses every tunable as a NixOS module option, so you get the same defaults declaratively without the file installer.
+| | |
+|---|---|
+| **Project** | [CachyOS/CachyOS-Settings](https://github.com/CachyOS/CachyOS-Settings) |
+| **License** | GPL-3.0 |
+| **Tracked** | Git commits (master) |
+<!-- END generated:upstream -->
 
 ## What Is This?
 
@@ -29,6 +27,27 @@ A module-only Nix flake providing CachyOS-Settings as a standalone NixOS module:
 - **Eval-only verification** — `nix flake check --no-build` is the canonical CI gate
 
 Provides sysctl tuning, udev rules, systemd tweaks, ZRAM, THP, I/O schedulers, audio optimizations, and more — matching upstream CachyOS defaults.
+
+<!-- BEGIN generated:installation -->
+## Installation
+
+Add as a flake input:
+
+```nix
+{
+  inputs.cachyos-settings = {
+    url = "github:Daaboulex/cachyos-settings-nix";
+    inputs.nixpkgs.follows = "nixpkgs";
+  };
+}
+```
+
+Import the NixOS module:
+
+```nix
+imports = [ inputs.cachyos-settings.nixosModules.default ];
+```
+<!-- END generated:installation -->
 
 ## Usage
 
@@ -95,6 +114,15 @@ nix flake check --no-build        # eval check (canonical CI gate, module-only r
 
 CI runs the same chain weekly via `.github/workflows/update.yml`; manual updates rarely needed.
 
+<!-- BEGIN generated:options -->
+<!-- END generated:options -->
+
 ## License
 
 This packaging flake is [GPL-3.0](./LICENSE) licensed (matches upstream). Upstream CachyOS-Settings is [GPL-3.0](https://github.com/CachyOS/CachyOS-Settings/blob/master/LICENSE).
+
+<!-- BEGIN generated:footer -->
+---
+
+*Maintained as part of the [Daaboulex](https://github.com/Daaboulex) NixOS ecosystem.*
+<!-- END generated:footer -->
