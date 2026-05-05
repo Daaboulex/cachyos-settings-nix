@@ -1,0 +1,16 @@
+{
+  "package": "cachyos-settings",
+  "upstream": {
+    "type": "github-commit",
+    "owner": "CachyOS",
+    "repo": "CachyOS-Settings",
+    "branch": "master"
+  },
+  "packageFile": null,
+  "hashes": [],
+  "verify": {
+    "binary": null,
+    "args": null,
+    "check": "eval"
+  }
+}
