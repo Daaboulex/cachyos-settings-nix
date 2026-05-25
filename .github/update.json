@@ -6,6 +6,9 @@
     "repo": "CachyOS-Settings",
     "branch": "master"
   },
+  "trackOnly": true,
+  "trackFile": "upstream-version.json",
+  "trackKey": "commit",
   "packageFile": null,
   "hashes": [],
   "verify": {

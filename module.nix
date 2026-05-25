@@ -86,8 +86,9 @@ in
       {
         boot.kernel.sysctl = {
           # Memory & I/O Management
-          # With ZRAM: 150 is optimal (prefer compressing anon pages over evicting file cache)
-          # Without ZRAM: 100 is the upstream CachyOS default
+          # DIVERGENCE FROM UPSTREAM: 70-cachyos-settings.conf sets a flat
+          # vm.swappiness=100. We raise it to 150 only when ZRAM is enabled
+          # (prefer compressing anon pages over evicting file cache); 100 otherwise.
           "vm.swappiness" = if cfg.zram.enable then 150 else 100;
           # Lower VFS cache pressure to keep directory/inode caches longer
           "vm.vfs_cache_pressure" = 50;
@@ -103,7 +104,9 @@ in
           # System Stability & Security
           # Disable NMI watchdog (performance + power saving)
           "kernel.nmi_watchdog" = 0;
-          # Allow unprivileged user namespaces (containers, sandboxing)
+          # Allow unprivileged user namespaces (containers, sandboxing).
+          # NOTE: kernel.unprivileged_userns_clone is a CachyOS/Debian kernel
+          # patch, NOT a mainline sysctl — errors at activation on a stock kernel.
           "kernel.unprivileged_userns_clone" = 1;
           # Hide kernel messages from console
           "kernel.printk" = "3 3 3 3";
@@ -235,7 +238,7 @@ in
         '';
 
         boot.extraModprobeConfig = ''
-          options nvidia NVreg_UsePageAttributeTable=1 NVreg_InitializeSystemMemoryAllocations=0 NVreg_DynamicPowerManagement=0x02 NVreg_EnableS0ixPowerManagement=1
+          options nvidia NVreg_UsePageAttributeTable=1 NVreg_InitializeSystemMemoryAllocations=0 NVreg_DynamicPowerManagement=0x02
         '';
       })
 
@@ -276,9 +279,12 @@ in
         };
 
         # Source: usr/lib/systemd/user.conf.d/10-limits.conf
+        #       + usr/lib/systemd/user.conf.d/00-timeout.conf (upstream a469516)
         environment.etc."systemd/user.conf.d/10-cachyos-limits.conf".text = ''
           [Manager]
           DefaultLimitNOFILE=1024:1048576
+          DefaultTimeoutStartSec=15s
+          DefaultTimeoutStopSec=10s
         '';
 
         # Source: usr/lib/systemd/system/user@.service.d/delegate.conf

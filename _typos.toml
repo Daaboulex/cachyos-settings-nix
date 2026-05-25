@@ -1,0 +1,4 @@
+# The audio rules reference the Linux HD-audio driver `snd-hda-intel` /
+# `snd_hda_intel`; typos misreads the "hda" substring as "had". Not a typo.
+[default.extend-words]
+hda = "hda"
