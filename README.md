@@ -16,6 +16,7 @@
 | **Project** | [CachyOS/CachyOS-Settings](https://github.com/CachyOS/CachyOS-Settings) |
 | **License** | GPL-3.0 |
 | **Tracked** | Git commits (master) |
+
 <!-- END generated:upstream -->
 
 ## What Is This?
@@ -23,9 +24,9 @@
 A module-only Nix flake providing CachyOS-Settings as a standalone NixOS module:
 
 - **Module-only repo** — no packages output; imports as `nixosModules.default`
-- **Weekly upstream tracking** — GitHub Action diffs `CachyOS-Settings` master every Monday and opens PRs on change
+- **Daily upstream tracking** — a GitHub Action checks `CachyOS-Settings` master daily and files a `remirror-needed` issue when upstream moves (this module is a hand-port; it never auto-edits)
 - **Scoped sub-toggles** — every concern (`zram`, `ioSchedulers`, `audio`, `storage`, `thp`, `systemd`, `timesyncd`, `networkManager`, `ntsync`, `debuginfod`, `coredump`, `nvidia`, `amdgpuGcnCompat`) is independently toggleable
-- **Eval-only verification** — `nix flake check --no-build` is the canonical CI gate
+- **Module-instantiation check** — CI instantiates the module (enabled) via `nix flake check`, so activation-time errors surface, not just evaluation
 
 Provides sysctl tuning, udev rules, systemd tweaks, ZRAM, THP, I/O schedulers, audio optimizations, and more — matching upstream CachyOS defaults.
 
@@ -48,6 +49,7 @@ Import the NixOS module:
 ```nix
 imports = [ inputs.cachyos-settings.nixosModules.default ];
 ```
+
 <!-- END generated:installation -->
 
 ## Usage
@@ -101,7 +103,7 @@ cachyos.settings = {
 
 ## Upstream Tracking
 
-Pinned upstream version is tracked in `upstream-version.json`. A weekly GitHub Action checks for upstream changes and opens PRs when the [CachyOS-Settings](https://github.com/CachyOS/CachyOS-Settings) repo updates.
+The last-mirrored upstream commit is recorded in `upstream-version.json`. A daily GitHub Action checks [CachyOS-Settings](https://github.com/CachyOS/CachyOS-Settings) master; because this module is a hand-port (not a fetched build), it files a `remirror-needed` issue when upstream moves rather than auto-updating.
 
 ## Development
 
@@ -113,7 +115,7 @@ nix fmt                           # format flake + module
 nix flake check --no-build        # eval check (canonical CI gate, module-only repo)
 ```
 
-CI runs the same chain weekly via `.github/workflows/update.yml`; manual updates rarely needed.
+The daily `.github/workflows/update.yml` only DETECTS upstream movement (it opens a `remirror-needed` issue); re-porting the module is a manual step.
 
 <!-- BEGIN generated:options -->
 <!-- END generated:options -->
