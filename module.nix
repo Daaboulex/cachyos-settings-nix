@@ -69,7 +69,7 @@ in
     };
 
     # --- GPU-specific (off by default) ---
-    nvidia.enable = lib.mkEnableOption "NVIDIA modprobe + udev tuning (PAT, runtime PM, power management)";
+    nvidia.enable = lib.mkEnableOption "NVIDIA modprobe + udev tuning (runtime PM, power management)";
     amdgpuGcnCompat.enable = lib.mkEnableOption "Force amdgpu driver for GCN 1.0+ (SI) and GCN 2.x (CIK) GPUs";
   };
 
@@ -238,7 +238,7 @@ in
         '';
 
         boot.extraModprobeConfig = ''
-          options nvidia NVreg_UsePageAttributeTable=1 NVreg_InitializeSystemMemoryAllocations=0 NVreg_DynamicPowerManagement=0x02
+          options nvidia NVreg_InitializeSystemMemoryAllocations=0 NVreg_DynamicPowerManagement=0x02
         '';
       })
 

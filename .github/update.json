@@ -15,5 +15,18 @@
     "binary": null,
     "args": null,
     "check": "eval"
-  }
+  },
+  "description": "CachyOS-Settings packaged for NixOS - hand-ported module for sysctl, udev, systemd, ZRAM, THP, and I/O tuning",
+  "topics": [
+    "nix",
+    "nixos",
+    "flake",
+    "nixos-module",
+    "cachyos",
+    "cachyos-settings",
+    "performance",
+    "sysctl",
+    "zram",
+    "kernel-tuning"
+  ]
 }
