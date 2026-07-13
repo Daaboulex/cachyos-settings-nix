@@ -1,4 +1,6 @@
 # The audio rules reference the Linux HD-audio driver `snd-hda-intel` /
 # `snd_hda_intel`; typos misreads the "hda" substring as "had". Not a typo.
+# `zink` is Mesa's OpenGL-on-Vulkan driver (upstream ships `zink-run`), not "zinc".
 [default.extend-words]
 hda = "hda"
+zink = "zink"

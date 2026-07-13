@@ -35,7 +35,7 @@ in
       default = true;
     };
     audio.enable =
-      lib.mkEnableOption "Audio optimizations (PCI latency, power save, HPET/RTC perms, CPU DMA latency, PAM rtprio)"
+      lib.mkEnableOption "Audio optimizations (PCI latency, power save, HPET/RTC perms, CPU DMA latency, PAM rtprio/nice)"
       // {
         default = true;
       };
@@ -192,6 +192,12 @@ in
             type = "-";
             item = "rtprio";
             value = "99";
+          }
+          {
+            domain = "@audio";
+            type = "-";
+            item = "nice";
+            value = "-11";
           }
         ];
       })

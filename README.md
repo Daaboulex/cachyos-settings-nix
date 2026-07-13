@@ -105,6 +105,13 @@ cachyos.settings = {
 
 The last-mirrored upstream commit is recorded in `upstream-version.json`. A daily GitHub Action checks [CachyOS-Settings](https://github.com/CachyOS/CachyOS-Settings) master; because this module is a hand-port (not a fetched build), it files a `remirror-needed` issue when upstream moves rather than auto-updating.
 
+Deliberately not ported (outside the module's settings scope; re-check this list at each re-mirror):
+
+- `usr/bin` user tools (`game-performance`, `cachyos-bugreport.sh`, `dlss-swapper`, `dlss-swapper-dll`, `kerver`, `paste-cachyos`, `sbctl-batch-sign`, `topmem`, `zink-run`) -- interactive tools, not system settings; `pci-latency` is the exception, ported as a systemd service.
+- Wireless regdomain automation (`usr/lib/iw-set-regdomain`, `85-iw-regulatory.rules`, `cachyos-iw-set-regdomain.{path,service}`) -- on NixOS set the regulatory domain declaratively instead.
+- GNOME/GDM branding (`usr/share/glib-2.0/.../login-screen` override, `usr/share/icons/cachyos.svg`).
+- X11 touchpad defaults (`usr/share/X11/xorg.conf.d/20-touchpad.conf`) -- use `services.libinput` options.
+
 ## Development
 
 ```bash
