@@ -105,9 +105,11 @@ in
           # Disable NMI watchdog (performance + power saving)
           "kernel.nmi_watchdog" = 0;
           # Allow unprivileged user namespaces (containers, sandboxing).
-          # NOTE: kernel.unprivileged_userns_clone is a CachyOS/Debian kernel
-          # patch, NOT a mainline sysctl — errors at activation on a stock kernel.
-          "kernel.unprivileged_userns_clone" = 1;
+          # kernel.unprivileged_userns_clone is a CachyOS/Debian kernel patch,
+          # not a mainline sysctl. The leading `-` makes systemd-sysctl ignore
+          # the write when the key is absent (a stock kernel, where unprivileged
+          # userns is already on), instead of erroring at activation.
+          "-kernel.unprivileged_userns_clone" = 1;
           # Hide kernel messages from console
           "kernel.printk" = "3 3 3 3";
           # Restrict kernel pointer exposure in /proc
