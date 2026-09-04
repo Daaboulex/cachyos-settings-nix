@@ -275,9 +275,7 @@ in
       # ================================================================
       (lib.mkIf cfg.systemd.enable {
         # Source: usr/lib/systemd/journald.conf.d/00-journal-size.conf
-        services.journald.extraConfig = ''
-          SystemMaxUse=50M
-        '';
+        services.journald.settings.Journal.SystemMaxUse = "50M";
 
         # Source: usr/lib/systemd/system.conf.d/00-timeout.conf + 10-limits.conf
         systemd.settings.Manager = {
