@@ -76,9 +76,10 @@ Enable in your configuration:
 ```nix
 cachyos.settings = {
   enable = true;
-  # All sub-options default to true except GPU-specific ones:
+  # All sub-options default to true except GPU-specific ones and watchdog:
   # nvidia.enable = false;        # Enable for NVIDIA GPUs
   # amdgpuGcnCompat.enable = false; # Enable for GCN 1.0/2.x GPUs
+  # watchdog.enable = false;      # Enable to keep the iTCO/SP5100 hardware watchdog upstream blacklists
 };
 ```
 

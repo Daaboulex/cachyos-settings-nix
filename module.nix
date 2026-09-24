@@ -67,6 +67,7 @@ in
     coredump.enable = lib.mkEnableOption "Coredump cleanup (3-day retention)" // {
       default = true;
     };
+    watchdog.enable = lib.mkEnableOption "the iTCO and SP5100 hardware watchdog drivers, which upstream blacklists";
 
     # --- GPU-specific (off by default) ---
     nvidia.enable = lib.mkEnableOption "NVIDIA modprobe + udev tuning (runtime PM, power management)";
@@ -123,14 +124,15 @@ in
           # Increase maximum open file handles
           "fs.file-max" = 2097152;
         };
+      }
 
-        # Watchdog Blacklist
-        # Source: usr/lib/modprobe.d/blacklist.conf
+      # Source: usr/lib/modprobe.d/blacklist.conf
+      (lib.mkIf (!cfg.watchdog.enable) {
         boot.blacklistedKernelModules = [
           "iTCO_wdt"
           "sp5100_tco"
         ];
-      }
+      })
 
       # ================================================================
       # ZRAM Swap
