@@ -25,7 +25,7 @@ A module-only Nix flake providing CachyOS-Settings as a standalone NixOS module:
 
 - **Module-only repo** — no packages output; imports as `nixosModules.default`
 - **Daily upstream tracking** — a GitHub Action checks `CachyOS-Settings` master daily and files a `remirror-needed` issue when upstream moves (this module is a hand-port; it never auto-edits)
-- **Scoped sub-toggles** — every concern (`zram`, `ioSchedulers`, `audio`, `storage`, `thp`, `systemd`, `timesyncd`, `networkManager`, `ntsync`, `debuginfod`, `coredump`, `nvidia`, `amdgpuGcnCompat`) is independently toggleable
+- **Scoped sub-toggles** — every concern (`zram`, `ioSchedulers`, `audio`, `storage`, `thp`, `systemd`, `timesyncd`, `networkManager`, `ntsync`, `debuginfod`, `coredump`, `watchdog`, `nvidia`, `amdgpuGcnCompat`) is independently toggleable
 - **Module-instantiation check** — CI instantiates the module (enabled) via `nix flake check`, so activation-time errors surface, not just evaluation
 
 Provides sysctl tuning, udev rules, systemd tweaks, ZRAM, THP, I/O schedulers, audio optimizations, and more — matching upstream CachyOS defaults.
@@ -79,7 +79,7 @@ cachyos.settings = {
   # All sub-options default to true except GPU-specific ones and watchdog:
   # nvidia.enable = false;        # Enable for NVIDIA GPUs
   # amdgpuGcnCompat.enable = false; # Enable for GCN 1.0/2.x GPUs
-  # watchdog.enable = false;      # Enable to keep the iTCO/SP5100 hardware watchdog upstream blacklists
+  # watchdog.enable = false;      # Enable to keep the iTCO/SP5100/WDAT hardware watchdog upstream blacklists
 };
 ```
 
@@ -88,23 +88,30 @@ cachyos.settings = {
 | Option | Default | Description |
 |--------|---------|-------------|
 | `cachyos.settings.enable` | `false` | Master toggle |
-| `zram.enable` | `true` | ZRAM swap (zstd, 100% RAM) |
+| `zram.enable` | `true` | ZRAM swap (zstd, 100% RAM), handed to xswap on a kernel that provides it |
 | `ioSchedulers.enable` | `true` | I/O scheduler udev rules |
 | `audio.enable` | `true` | Audio optimizations |
 | `storage.enable` | `true` | SATA ALPM + hdparm |
 | `thp.enable` | `true` | THP defrag + khugepaged |
-| `systemd.enable` | `true` | Systemd timeouts, limits, delegation |
+| `systemd.enable` | `true` | Systemd timeouts, limits, delegation, systemd-oomd slice policy (acts only while systemd-oomd runs, which NixOS does by default; the module does not switch it on) |
 | `timesyncd.enable` | `true` | NTP (Cloudflare + NixOS pool) |
 | `networkManager.enable` | `true` | DNS via systemd-resolved |
 | `ntsync.enable` | `true` | NT sync module for Wine/Proton |
 | `debuginfod.enable` | `true` | CachyOS debuginfod server |
 | `coredump.enable` | `true` | Coredump cleanup (3-day) |
+| `watchdog.enable` | `false` | Keep the iTCO, SP5100 and WDAT watchdog drivers upstream blacklists |
 | `nvidia.enable` | `false` | NVIDIA modprobe + udev tuning |
 | `amdgpuGcnCompat.enable` | `false` | Force amdgpu for GCN 1.0+/2.x |
 
 ## Upstream Tracking
 
 The last-mirrored upstream commit is recorded in `upstream-version.json`. A daily GitHub Action checks [CachyOS-Settings](https://github.com/CachyOS/CachyOS-Settings) master; because this module is a hand-port (not a fetched build), it files a `remirror-needed` issue when upstream moves rather than auto-updating.
+
+Diverges from upstream only where upstream's value would break NixOS or cannot apply on it; everything else is ported as upstream ships it (re-check this list at each re-mirror):
+
+- `vm.swappiness`: upstream's `70-cachyos-settings.conf` sets a flat 100 and its `30-zram.rules` raises it to 150 once zram0 initialises. The module sets 150 whenever its ZRAM half is on, to prefer compressing anonymous pages over evicting file cache, and 100 otherwise.
+- `kernel.unprivileged_userns_clone`: written as `-kernel.unprivileged_userns_clone`. The key comes from a CachyOS/Debian kernel patch, and the leading `-` makes systemd-sysctl skip it on a stock kernel (where unprivileged user namespaces are already on) instead of failing at activation.
+- Watchdog blacklist (`iTCO_wdt`, `sp5100_tco`, `wdat_wdt` from `modprobe.d/blacklist.conf`): upstream always blacklists them. The module does so unless `watchdog.enable` is set, so a host that needs its hardware watchdog can keep it.
 
 Deliberately not ported (outside the module's settings scope; re-check this list at each re-mirror):
 

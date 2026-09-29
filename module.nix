@@ -19,6 +19,85 @@ let
     ${pkgs.pciutils}/bin/setpci -v -s '0:0' latency_timer=0
     ${pkgs.pciutils}/bin/setpci -v -d '*:*:04xx' latency_timer=80
   '';
+
+  audioPmCtl = pkgs.writeShellApplication {
+    name = "audio-pm-ctl";
+    runtimeInputs = [
+      pkgs.coreutils
+      pkgs.gnugrep
+    ];
+    inheritPath = false;
+    bashOptions = [ ];
+    text = ''
+      declare -r PARAM=/sys/module/snd_hda_intel/parameters/power_save
+      declare -r STATE=/run/udev/snd-hda-intel-powersave
+
+      save() {
+          local cur
+          cur="$(cat "$PARAM")"
+          [[ "$cur" != 0 ]] && echo "$cur" > "$STATE"
+          return 0
+      }
+
+      is_on_ac() {
+          local d online
+          while IFS= read -r d; do
+              online="$(cat "''${d/type/online}" 2>/dev/null)"
+              [[ "$online" == 1 ]] || return 1
+          done < <(grep -l "Mains" /sys/class/power_supply/*/type 2>/dev/null)
+          return 0
+      }
+
+      do_init() {
+          is_on_ac || return 0
+          save
+          echo 0 > "$PARAM"
+      }
+
+      do_battery() {
+          local v
+          v="$(cat "$STATE" 2>/dev/null)"
+          [[ -n "$v" ]] || v=10
+          echo "$v" > "$PARAM"
+      }
+
+      do_ac() {
+          save
+          echo 0 > "$PARAM"
+      }
+
+      usage() {
+          echo "Usage: $0 {init|battery|ac}" >&2
+          exit 1
+      }
+
+      main() {
+          case "$1" in
+              init)    do_init ;;
+              battery) do_battery ;;
+              ac)      do_ac ;;
+              *)       usage ;;
+          esac
+      }
+
+      main "$@"
+    '';
+  };
+
+  xswapGenerator = pkgs.writeScript "xswap-generator" ''
+    #!${pkgs.bashInteractive}/bin/bash
+    if [[ -e /sys/kernel/mm/xswap && ! -n "$(compgen -G '/sys/kernel/mm/xswap/type*')" ]]; then
+        ${pkgs.coreutils}/bin/ln -s /dev/null /run/systemd/zram-generator.conf
+        echo 100 > /sys/kernel/mm/xswap/create
+    fi
+  '';
+
+  oomdPerSliceDefaults = ''
+    [Slice]
+    ManagedOOMSwap=kill
+    ManagedOOMMemoryPressure=kill
+    ManagedOOMMemoryPressureLimit=80%
+  '';
 in
 {
   # ==================================================================
@@ -28,9 +107,11 @@ in
     enable = lib.mkEnableOption "CachyOS system optimizations (upstream-matched settings)";
 
     # --- Upstream CachyOS-Settings groups ---
-    zram.enable = lib.mkEnableOption "ZRAM swap (zstd, 100% RAM)" // {
-      default = true;
-    };
+    zram.enable =
+      lib.mkEnableOption "ZRAM swap (zstd, 100% RAM), handed to xswap on a kernel that provides it"
+      // {
+        default = true;
+      };
     ioSchedulers.enable = lib.mkEnableOption "I/O scheduler udev rules (bfq/mq-deadline/none)" // {
       default = true;
     };
@@ -48,7 +129,7 @@ in
         default = true;
       };
     systemd.enable =
-      lib.mkEnableOption "Systemd timeouts, NOFILE limits, journal size, cgroup delegation, rtkit"
+      lib.mkEnableOption "Systemd timeouts, NOFILE limits, journal size, cgroup delegation, rtkit, systemd-oomd slice policy"
       // {
         default = true;
       };
@@ -67,7 +148,7 @@ in
     coredump.enable = lib.mkEnableOption "Coredump cleanup (3-day retention)" // {
       default = true;
     };
-    watchdog.enable = lib.mkEnableOption "the iTCO and SP5100 hardware watchdog drivers, which upstream blacklists";
+    watchdog.enable = lib.mkEnableOption "the iTCO, SP5100 and WDAT hardware watchdog drivers, which upstream blacklists";
 
     # --- GPU-specific (off by default) ---
     nvidia.enable = lib.mkEnableOption "NVIDIA modprobe + udev tuning (runtime PM, power management)";
@@ -87,9 +168,6 @@ in
       {
         boot.kernel.sysctl = {
           # Memory & I/O Management
-          # DIVERGENCE FROM UPSTREAM: 70-cachyos-settings.conf sets a flat
-          # vm.swappiness=100. We raise it to 150 only when ZRAM is enabled
-          # (prefer compressing anon pages over evicting file cache); 100 otherwise.
           "vm.swappiness" = if cfg.zram.enable then 150 else 100;
           # Lower VFS cache pressure to keep directory/inode caches longer
           "vm.vfs_cache_pressure" = 50;
@@ -105,16 +183,12 @@ in
           # System Stability & Security
           # Disable NMI watchdog (performance + power saving)
           "kernel.nmi_watchdog" = 0;
-          # Allow unprivileged user namespaces (containers, sandboxing).
-          # kernel.unprivileged_userns_clone is a CachyOS/Debian kernel patch,
-          # not a mainline sysctl. The leading `-` makes systemd-sysctl ignore
-          # the write when the key is absent (a stock kernel, where unprivileged
-          # userns is already on), instead of erroring at activation.
           "-kernel.unprivileged_userns_clone" = 1;
           # Hide kernel messages from console
           "kernel.printk" = "3 3 3 3";
           # Restrict kernel pointer exposure in /proc
           "kernel.kptr_restrict" = 2;
+          "kernel.sysrq" = 1;
 
           # Network
           # Increase network device backlog queue
@@ -131,6 +205,7 @@ in
         boot.blacklistedKernelModules = [
           "iTCO_wdt"
           "sp5100_tco"
+          "wdat_wdt"
         ];
       })
 
@@ -151,6 +226,14 @@ in
         services.udev.extraRules = ''
           ACTION=="change", KERNEL=="zram0", ATTR{initstate}=="1", SYSCTL{vm.swappiness}="150", RUN+="${pkgs.bash}/bin/bash -c 'echo N > /sys/module/zswap/parameters/enabled'"
         '';
+
+        systemd.generators.xswap-generator = "${xswapGenerator}";
+        systemd.packages = [
+          (pkgs.writeTextDir "lib/systemd/system/systemd-zram-setup@.service.d/xswap.conf" ''
+            [Unit]
+            ConditionPathExistsGlob=!/sys/kernel/mm/xswap/type*
+          '')
+        ];
       })
 
       # ================================================================
@@ -162,9 +245,9 @@ in
       (lib.mkIf cfg.audio.enable {
         services.udev.extraRules = ''
           # 20-audio-pm: Disable snd-hda-intel power saving on AC
-          ACTION=="add", SUBSYSTEM=="sound", KERNEL=="card*", DRIVERS=="snd_hda_intel", TEST!="/run/udev/snd-hda-intel-powersave", RUN+="${pkgs.bash}/bin/bash -c 'touch /run/udev/snd-hda-intel-powersave; [[ $$(cat /sys/class/power_supply/BAT0/status 2>/dev/null) != \"Discharging\" ]] && echo $$(cat /sys/module/snd_hda_intel/parameters/power_save) > /run/udev/snd-hda-intel-powersave && echo 0 > /sys/module/snd_hda_intel/parameters/power_save'"
-          SUBSYSTEM=="power_supply", ENV{POWER_SUPPLY_ONLINE}=="0", TEST=="/sys/module/snd_hda_intel", RUN+="${pkgs.bash}/bin/bash -c 'echo $$(cat /run/udev/snd-hda-intel-powersave 2>/dev/null || echo 10) > /sys/module/snd_hda_intel/parameters/power_save'"
-          SUBSYSTEM=="power_supply", ENV{POWER_SUPPLY_ONLINE}=="1", TEST=="/sys/module/snd_hda_intel", RUN+="${pkgs.bash}/bin/bash -c '[[ $$(cat /sys/module/snd_hda_intel/parameters/power_save) != 0 ]] && echo $$(cat /sys/module/snd_hda_intel/parameters/power_save) > /run/udev/snd-hda-intel-powersave; echo 0 > /sys/module/snd_hda_intel/parameters/power_save'"
+          ACTION=="add", SUBSYSTEM=="sound", KERNEL=="card*", DRIVERS=="snd_hda_intel", TEST!="/run/udev/snd-hda-intel-powersave", RUN+="${lib.getExe audioPmCtl} init"
+          ACTION=="add|change", SUBSYSTEM=="power_supply", ENV{POWER_SUPPLY_TYPE}=="Mains", ENV{POWER_SUPPLY_ONLINE}=="0", TEST=="/sys/module/snd_hda_intel", RUN+="${lib.getExe audioPmCtl} battery"
+          ACTION=="add|change", SUBSYSTEM=="power_supply", ENV{POWER_SUPPLY_TYPE}=="Mains", ENV{POWER_SUPPLY_ONLINE}=="1", TEST=="/sys/module/snd_hda_intel", RUN+="${lib.getExe audioPmCtl} ac"
           # 40-hpet-permissions: Audio group access to HPET/RTC
           KERNEL=="rtc0", GROUP="audio"
           KERNEL=="hpet", GROUP="audio"
@@ -216,7 +299,7 @@ in
           # 50-sata: SATA Active Link Power Management
           ACTION=="add", SUBSYSTEM=="scsi_host", KERNEL=="host*", ATTR{link_power_management_supported}=="1", ATTR{link_power_management_policy}=="*", ATTR{link_power_management_policy}="max_performance"
           # 69-hdparm: HDD tuning (-B 254 -S 0)
-          ACTION=="add|change", KERNEL=="sd[a-z]", ATTR{queue/rotational}=="1", ATTRS{id/bus}=="ata", RUN+="${pkgs.hdparm}/bin/hdparm -B 254 -S 0 /dev/%k"
+          ACTION=="add|change", KERNEL=="sd[a-z]", ATTR{queue/rotational}=="1", ENV{ID_USB_DRIVER}=="", ENV{ID_BUS}=="ata", RUN+="${pkgs.hdparm}/bin/hdparm -B 254 -S 0 /dev/%k"
         '';
       })
 
@@ -248,7 +331,7 @@ in
         '';
 
         boot.extraModprobeConfig = ''
-          options nvidia NVreg_InitializeSystemMemoryAllocations=0 NVreg_DynamicPowerManagement=0x02
+          options nvidia NVreg_InitializeSystemMemoryAllocations=0
         '';
       })
 
@@ -306,6 +389,15 @@ in
           overrideStrategy = "asDropin";
           serviceConfig.LogLevelMax = "info";
         };
+
+        systemd.packages = [
+          (pkgs.writeTextDir "lib/systemd/system/system.slice.d/10-oomd-per-slice-defaults.conf" oomdPerSliceDefaults)
+          (pkgs.writeTextDir "lib/systemd/system/user-.slice.d/10-oomd-per-slice-defaults.conf" oomdPerSliceDefaults)
+          (pkgs.writeTextDir "lib/systemd/system/session.slice.d/10-ignore-session-slice.conf" ''
+            [Slice]
+            ManagedOOMPreference=omit
+          '')
+        ];
       })
 
       # ================================================================
