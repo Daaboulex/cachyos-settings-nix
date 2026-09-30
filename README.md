@@ -83,25 +83,29 @@ cachyos.settings = {
 };
 ```
 
+Every single-valued setting the module lands is a `lib.mkOverride 500`, the priority nixpkgs' own installer profiles and editor modules use: it beats the `mkDefault` values NixOS itself sets (`kernel.kptr_restrict`, `kernel.printk`), and a host overrides it with a plain line, while two modules that set the same value at the same priority fail evaluation as a conflict instead of one silently winning. The udev rules, modprobe lines, kernel module lists, tmpfiles rules, PAM limits and debuginfod servers stay at the default priority and merge with the host's own, as the module system does for lists and lines; a lower priority there would drop the module's whole contribution the moment any other module adds to the same option, so those are switched off with their toggle, never overridden.
+
 ## Options
 
-| Option | Default | Description |
-|--------|---------|-------------|
-| `cachyos.settings.enable` | `false` | Master toggle |
-| `zram.enable` | `true` | ZRAM swap (zstd, 100% RAM), handed to xswap on a kernel that provides it |
-| `ioSchedulers.enable` | `true` | I/O scheduler udev rules |
-| `audio.enable` | `true` | Audio optimizations |
-| `storage.enable` | `true` | SATA ALPM + hdparm |
-| `thp.enable` | `true` | THP defrag + khugepaged |
-| `systemd.enable` | `true` | Systemd timeouts, limits, delegation, systemd-oomd slice policy (acts only while systemd-oomd runs, which NixOS does by default; the module does not switch it on) |
-| `timesyncd.enable` | `true` | NTP (Cloudflare, with Google and the Arch pool as fallback) |
-| `networkManager.enable` | `true` | DNS via systemd-resolved |
-| `ntsync.enable` | `true` | NT sync module for Wine/Proton |
-| `debuginfod.enable` | `true` | CachyOS debuginfod server |
-| `coredump.enable` | `true` | Coredump cleanup (3-day) |
-| `watchdog.enable` | `false` | Keep the iTCO, SP5100 and WDAT watchdog drivers upstream blacklists |
-| `nvidia.enable` | `false` | NVIDIA modprobe + udev tuning |
-| `amdgpuGcnCompat.enable` | `false` | Force amdgpu for GCN 1.0+/2.x |
+The last column names the upstream files each toggle ports, as paths in the CachyOS-Settings tree at the commit `upstream-version.json` pins.
+
+| Option | Default | Description | Upstream files |
+|--------|---------|-------------|----------------|
+| `cachyos.settings.enable` | `false` | Master toggle; the sysctls, and the zram0 rule whenever `zramSwap.enable` is on, whoever set it | `usr/lib/sysctl.d/70-cachyos-settings.conf`, `usr/lib/udev/rules.d/30-zram.rules` |
+| `zram.enable` | `true` | ZRAM swap (zstd, 100% RAM), handed to xswap on a kernel that provides it | `usr/lib/systemd/zram-generator.conf`, the xswap generator and its `systemd-zram-setup@.service` drop-in |
+| `ioSchedulers.enable` | `true` | I/O scheduler udev rules: bfq for rotational disks, mq-deadline for SSD and eMMC, kyber for NVMe | `usr/lib/udev/rules.d/60-ioschedulers.rules` |
+| `audio.enable` | `true` | Audio optimizations: PCI latency timers (80 cycles for sound cards, 20 for the rest), snd-hda-intel power saving off on AC, HPET/RTC and CPU DMA latency for the audio group, rtprio and nice limits | `usr/lib/udev/rules.d/20-audio-pm.rules` with its `audio-pm-ctl` helper, `40-hpet-permissions.rules`, `99-cpu-dma-latency.rules`, `usr/lib/systemd/system/pci-latency.service`, `etc/security/limits.d/20-audio.conf` |
+| `storage.enable` | `true` | SATA ALPM + hdparm | `usr/lib/udev/rules.d/50-sata.rules`, `69-hdparm.rules` |
+| `thp.enable` | `true` | THP defrag + khugepaged | `usr/lib/tmpfiles.d/thp.conf`, `thp-shrinker.conf` |
+| `systemd.enable` | `true` | Systemd timeouts, limits, delegation, systemd-oomd slice policy (acts only while systemd-oomd runs, which NixOS does by default; the module does not switch it on) | `usr/lib/systemd/journald.conf.d/00-journal-size.conf`, `system.conf.d/00-timeout.conf`, `system.conf.d/10-limits.conf`, `user.conf.d/00-timeout.conf`, `user.conf.d/10-limits.conf`, `system/user@.service.d/delegate.conf`, `system/rtkit-daemon.service.d/override.conf`, `system/system.slice.d/10-oomd-per-slice-defaults.conf`, `system/user-.slice.d/10-oomd-per-slice-defaults.conf`, `user/session.slice.d/10-ignore-session-slice.conf` |
+| `timesyncd.enable` | `true` | NTP (Cloudflare, with Google and the Arch pool as fallback) | `usr/lib/systemd/timesyncd.conf.d/10-timesyncd.conf` |
+| `networkManager.enable` | `true` | DNS via systemd-resolved | `usr/lib/NetworkManager/conf.d/dns.conf` |
+| `ntsync.enable` | `true` | NT sync module for Wine/Proton | `usr/lib/modules-load.d/ntsync.conf` |
+| `debuginfod.enable` | `true` | CachyOS debuginfod server | `etc/debuginfod/cachyos.urls` |
+| `coredump.enable` | `true` | Coredump cleanup (3-day) | `usr/lib/tmpfiles.d/coredump.conf` |
+| `watchdog.enable` | `false` | Keep the iTCO, SP5100 and WDAT watchdog drivers upstream blacklists | `usr/lib/modprobe.d/blacklist.conf` |
+| `nvidia.enable` | `false` | NVIDIA modprobe + udev tuning | `usr/lib/udev/rules.d/71-nvidia.rules`, `usr/lib/modprobe.d/nvidia.conf` |
+| `amdgpuGcnCompat.enable` | `false` | Force amdgpu for GCN 1.0+/2.x | `usr/lib/modprobe.d/amdgpu.conf` |
 
 ## Upstream Tracking
 
@@ -111,8 +115,7 @@ Every value is upstream's, landed through the NixOS option that owns the file. I
 
 - `kernel.unprivileged_userns_clone`: written as `-kernel.unprivileged_userns_clone`. The key comes from a CachyOS/Debian kernel patch, and the leading `-` makes systemd-sysctl skip it on a stock kernel (where unprivileged user namespaces are already on) instead of failing at activation.
 - Watchdog blacklist (`iTCO_wdt`, `sp5100_tco`, `wdat_wdt` from `modprobe.d/blacklist.conf`): upstream always blacklists them. The module does so unless `watchdog.enable` is set, so a host that needs its hardware watchdog can keep it.
-- systemd-oomd on user slices: upstream's `user-.slice.d` drop-in sets `ManagedOOMMemoryPressure=kill` at 80% on each user's slice. The module turns on `systemd.oomd.enableUserSlices`, which monitors `user.slice` and every slice of the user manager at the same limit instead, and sets `DefaultMemoryPressureLimit=80%` in `oomd.conf`, a file upstream does not ship. `ManagedOOMSwap=kill` lands on `user-.slice` and `system.slice` as upstream.
-- SATA link power: `powerManagement.scsiLinkPolicy` writes `max_performance` to every `scsi_host` without upstream's `link_power_management_supported=="1"` guard. NixOS refuses it next to `services.tlp`, so a TLP host sets `storage.enable = false`.
+- SATA link power: `powerManagement.scsiLinkPolicy` writes `max_performance` to every `scsi_host` without upstream's `link_power_management_supported=="1"` guard. NixOS refuses it next to `services.tlp`, so a TLP host sets `powerManagement.scsiLinkPolicy = null` (keeping the hdparm rule) or `storage.enable = false`.
 
 Deliberately not ported (outside the module's settings scope; re-check this list at each re-mirror):
 

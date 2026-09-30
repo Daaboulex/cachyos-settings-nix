@@ -6,10 +6,8 @@
 }:
 let
   cfg = config.cachyos.settings;
+  upstreamDefault = lib.mkOverride 500;
 
-  # PCI latency script from CachyOS
-  # Sets sound card PCI latency to 80 cycles for reduced audio latency
-  # Resets all other devices to 20 cycles to prevent gaps
   pciLatencyScript = pkgs.writeShellScript "pci-latency" ''
     if [ "$(id -u)" -ne 0 ]; then
       echo "Error: This script must be run with root privileges." >&2
@@ -93,13 +91,9 @@ let
   '';
 in
 {
-  # ==================================================================
-  # Options
-  # ==================================================================
   options.cachyos.settings = {
     enable = lib.mkEnableOption "CachyOS system optimizations (upstream-matched settings)";
 
-    # --- Upstream CachyOS-Settings groups ---
     zram.enable =
       lib.mkEnableOption "ZRAM swap (zstd, 100% RAM), handed to xswap on a kernel that provides it"
       // {
@@ -147,57 +141,34 @@ in
     };
     watchdog.enable = lib.mkEnableOption "the iTCO, SP5100 and WDAT hardware watchdog drivers, which upstream blacklists";
 
-    # --- GPU-specific (off by default) ---
     nvidia.enable = lib.mkEnableOption "NVIDIA modprobe + udev tuning (runtime PM, power management)";
     amdgpuGcnCompat.enable = lib.mkEnableOption "Force amdgpu driver for GCN 1.0+ (SI) and GCN 2.x (CIK) GPUs";
   };
 
-  # ==================================================================
-  # Config
-  # ==================================================================
   config = lib.mkIf cfg.enable (
     lib.mkMerge [
 
-      # ================================================================
-      # Core Sysctls — always on with top-level enable
-      # Source: usr/lib/sysctl.d/70-cachyos-settings.conf
-      # ================================================================
       {
-        boot.kernel.sysctl = {
-          # Memory & I/O Management
+        boot.kernel.sysctl = lib.mapAttrs (_: upstreamDefault) {
           "vm.swappiness" = 100;
-          # Lower VFS cache pressure to keep directory/inode caches longer
           "vm.vfs_cache_pressure" = 50;
-          # Process starts writing dirty data at 256MB
           "vm.dirty_bytes" = 268435456;
-          # Background flusher starts at 64MB
           "vm.dirty_background_bytes" = 67108864;
-          # Flusher wakeup interval: 15 seconds
           "vm.dirty_writeback_centisecs" = 1500;
-          # Disable swap readahead clustering (optimal for ZRAM/SSD)
           "vm.page-cluster" = 0;
 
-          # System Stability & Security
-          # Disable NMI watchdog (performance + power saving)
           "kernel.nmi_watchdog" = 0;
           "-kernel.unprivileged_userns_clone" = 1;
-          # Hide kernel messages from console
           "kernel.printk" = "3 3 3 3";
-          # Restrict kernel pointer exposure in /proc
           "kernel.kptr_restrict" = 2;
           "kernel.sysrq" = 1;
 
-          # Network
-          # Increase network device backlog queue
           "net.core.netdev_max_backlog" = 4096;
 
-          # Filesystem
-          # Increase maximum open file handles
           "fs.file-max" = 2097152;
         };
       }
 
-      # Source: usr/lib/modprobe.d/blacklist.conf
       (lib.mkIf (!cfg.watchdog.enable) {
         boot.blacklistedKernelModules = [
           "iTCO_wdt"
@@ -206,16 +177,12 @@ in
         ];
       })
 
-      # ================================================================
-      # ZRAM Swap
-      # Source: usr/lib/systemd/zram-generator.conf
-      # ================================================================
       (lib.mkIf cfg.zram.enable {
         zramSwap = {
           enable = true;
-          algorithm = "zstd";
-          memoryPercent = 100;
-          priority = 100;
+          algorithm = upstreamDefault "zstd";
+          memoryPercent = upstreamDefault 100;
+          priority = upstreamDefault 100;
         };
 
         systemd.generators.xswap-generator = "${xswapGenerator}";
@@ -227,34 +194,22 @@ in
         ];
       })
 
-      # Source: usr/lib/udev/rules.d/30-zram.rules
       (lib.mkIf config.zramSwap.enable {
         services.udev.extraRules = ''
           ACTION=="change", KERNEL=="zram0", ATTR{initstate}=="1", SYSCTL{vm.swappiness}="150", RUN+="${pkgs.bash}/bin/bash -c 'echo N > /sys/module/zswap/parameters/enabled'"
         '';
       })
 
-      # ================================================================
-      # Udev: Audio Power Management + Device Permissions
-      # Source: usr/lib/udev/rules.d/20-audio-pm.rules
-      # Source: usr/lib/udev/rules.d/40-hpet-permissions.rules
-      # Source: usr/lib/udev/rules.d/99-cpu-dma-latency.rules
-      # ================================================================
       (lib.mkIf cfg.audio.enable {
         services.udev.extraRules = ''
-          # 20-audio-pm: Disable snd-hda-intel power saving on AC
           ACTION=="add", SUBSYSTEM=="sound", KERNEL=="card*", DRIVERS=="snd_hda_intel", TEST!="/run/udev/snd-hda-intel-powersave", RUN+="${lib.getExe audioPmCtl} init"
           ACTION=="add|change", SUBSYSTEM=="power_supply", ENV{POWER_SUPPLY_TYPE}=="Mains", ENV{POWER_SUPPLY_ONLINE}=="0", TEST=="/sys/module/snd_hda_intel", RUN+="${lib.getExe audioPmCtl} battery"
           ACTION=="add|change", SUBSYSTEM=="power_supply", ENV{POWER_SUPPLY_TYPE}=="Mains", ENV{POWER_SUPPLY_ONLINE}=="1", TEST=="/sys/module/snd_hda_intel", RUN+="${lib.getExe audioPmCtl} ac"
-          # 40-hpet-permissions: Audio group access to HPET/RTC
           KERNEL=="rtc0", GROUP="audio"
           KERNEL=="hpet", GROUP="audio"
-          # 99-cpu-dma-latency: Audio group access to CPU DMA latency
           DEVPATH=="/devices/virtual/misc/cpu_dma_latency", OWNER="root", GROUP="audio", MODE="0660"
         '';
 
-        # PCI latency service
-        # Source: usr/lib/systemd/system/pci-latency.service
         systemd.services.pci-latency = {
           description = "Adjust latency timers for PCI peripherals";
           wantedBy = [ "multi-user.target" ];
@@ -264,8 +219,6 @@ in
           };
         };
 
-        # PAM audio limits
-        # Source: etc/security/limits.d/20-audio.conf
         security.pam.loginLimits = [
           {
             domain = "@audio";
@@ -282,43 +235,24 @@ in
         ];
       })
 
-      # ================================================================
-      # Udev: SATA ALPM + hdparm
-      # Source: usr/lib/udev/rules.d/50-sata.rules
-      # Source: usr/lib/udev/rules.d/69-hdparm.rules
-      # ================================================================
       (lib.mkIf cfg.storage.enable {
-        powerManagement.scsiLinkPolicy = "max_performance";
+        powerManagement.scsiLinkPolicy = upstreamDefault "max_performance";
 
         services.udev.extraRules = ''
-          # 69-hdparm: HDD tuning (-B 254 -S 0)
           ACTION=="add|change", KERNEL=="sd[a-z]", ATTR{queue/rotational}=="1", ENV{ID_USB_DRIVER}=="", ENV{ID_BUS}=="ata", RUN+="${pkgs.hdparm}/bin/hdparm -B 254 -S 0 /dev/%k"
         '';
       })
 
-      # ================================================================
-      # Udev: I/O Schedulers
-      # Source: usr/lib/udev/rules.d/60-ioschedulers.rules
-      # ================================================================
       (lib.mkIf cfg.ioSchedulers.enable {
         services.udev.extraRules = ''
-          # HDD: bfq
           ACTION=="add|change", KERNEL=="sd[a-z]*", ATTR{queue/rotational}=="1", ATTR{queue/scheduler}="bfq"
-          # SSD: mq-deadline
           ACTION=="add|change", KERNEL=="sd[a-z]*|mmcblk[0-9]*", ATTR{queue/rotational}=="0", ATTR{queue/scheduler}="mq-deadline"
-          # NVMe: kyber (upstream CachyOS#220)
           ACTION=="add|change", KERNEL=="nvme[0-9]*", ATTR{queue/rotational}=="0", ATTR{queue/scheduler}="kyber"
         '';
       })
 
-      # ================================================================
-      # Udev + Modprobe: NVIDIA
-      # Source: usr/lib/udev/rules.d/71-nvidia.rules
-      # Source: usr/lib/modprobe.d/nvidia.conf
-      # ================================================================
       (lib.mkIf cfg.nvidia.enable {
         services.udev.extraRules = ''
-          # Runtime PM: enable on bind, disable on unbind
           ACTION=="add|bind", SUBSYSTEM=="pci", DRIVERS=="nvidia", ATTR{vendor}=="0x10de", ATTR{class}=="0x03[0-9]*", TEST=="power/control", ATTR{power/control}="auto"
           ACTION=="remove|unbind", SUBSYSTEM=="pci", DRIVERS=="nvidia", ATTR{vendor}=="0x10de", ATTR{class}=="0x03[0-9]*", TEST=="power/control", ATTR{power/control}="on"
         '';
@@ -328,10 +262,6 @@ in
         '';
       })
 
-      # ================================================================
-      # Modprobe: AMDGPU GCN Compatibility
-      # Source: usr/lib/modprobe.d/amdgpu.conf
-      # ================================================================
       (lib.mkIf cfg.amdgpuGcnCompat.enable {
         boot.extraModprobeConfig = ''
           options amdgpu si_support=1 cik_support=1
@@ -339,79 +269,60 @@ in
         '';
       })
 
-      # ================================================================
-      # Kernel Modules: ntsync
-      # Source: usr/lib/modules-load.d/ntsync.conf
-      # ================================================================
       (lib.mkIf cfg.ntsync.enable {
         boot.kernelModules = [ "ntsync" ];
       })
 
-      # ================================================================
-      # Systemd — Service & System Management
-      # Source: journald.conf.d, system.conf.d, user.conf.d, delegate, rtkit
-      # ================================================================
       (lib.mkIf cfg.systemd.enable {
-        # Source: usr/lib/systemd/journald.conf.d/00-journal-size.conf
-        services.journald.settings.Journal.SystemMaxUse = lib.mkDefault "50M";
+        services.journald.settings.Journal.SystemMaxUse = upstreamDefault "50M";
 
-        # Source: usr/lib/systemd/system.conf.d/00-timeout.conf + 10-limits.conf
-        systemd.settings.Manager = {
+        systemd.settings.Manager = lib.mapAttrs (_: upstreamDefault) {
           DefaultTimeoutStartSec = "15s";
           DefaultTimeoutStopSec = "10s";
           DefaultLimitNOFILE = "2048:2097152";
         };
 
-        # Source: usr/lib/systemd/user.conf.d/00-timeout.conf + 10-limits.conf
-        systemd.user.settings.Manager = {
+        systemd.user.settings.Manager = lib.mapAttrs (_: upstreamDefault) {
           DefaultTimeoutStartSec = "15s";
           DefaultTimeoutStopSec = "10s";
           DefaultLimitNOFILE = "1024:1048576";
         };
 
-        # Source: usr/lib/systemd/system/user@.service.d/delegate.conf
         systemd.services."user@" = {
           overrideStrategy = "asDropin";
-          serviceConfig.Delegate = "cpu cpuset io memory pids";
+          serviceConfig.Delegate = upstreamDefault "cpu cpuset io memory pids";
         };
 
-        # Source: usr/lib/systemd/system/rtkit-daemon.service.d/override.conf
         systemd.services.rtkit-daemon = {
           overrideStrategy = "asDropin";
-          serviceConfig.LogLevelMax = "info";
+          serviceConfig.LogLevelMax = upstreamDefault "info";
         };
 
-        # Source: usr/lib/systemd/system/{system,user-}.slice.d/10-oomd-per-slice-defaults.conf
-        systemd.oomd = {
-          enableSystemSlice = true;
-          enableUserSlices = true;
-          settings.OOM.DefaultMemoryPressureLimit = "80%";
-        };
+        systemd.oomd.enableSystemSlice = upstreamDefault true;
         systemd.slices.system = {
           overrideStrategy = "asDropin";
-          sliceConfig.ManagedOOMSwap = "kill";
+          sliceConfig.ManagedOOMSwap = upstreamDefault "kill";
         };
         systemd.slices."user-" = {
           overrideStrategy = "asDropin";
-          sliceConfig.ManagedOOMSwap = "kill";
+          sliceConfig = lib.mapAttrs (_: upstreamDefault) {
+            ManagedOOMSwap = "kill";
+            ManagedOOMMemoryPressure = "kill";
+            ManagedOOMMemoryPressureLimit = "80%";
+          };
         };
 
-        # Source: usr/lib/systemd/user/session.slice.d/10-ignore-session-slice.conf
         systemd.user.slices.session = {
           overrideStrategy = "asDropin";
-          sliceConfig.ManagedOOMPreference = "omit";
+          sliceConfig.ManagedOOMPreference = upstreamDefault "omit";
         };
       })
 
-      # ================================================================
-      # Timesyncd — NTP
-      # Source: usr/lib/systemd/timesyncd.conf.d/10-timesyncd.conf
-      # ================================================================
       (lib.mkIf cfg.timesyncd.enable {
         services.timesyncd = {
-          enable = lib.mkDefault true;
-          servers = [ "time.cloudflare.com" ];
-          fallbackServers = [
+          enable = upstreamDefault true;
+          servers = upstreamDefault [ "time.cloudflare.com" ];
+          fallbackServers = upstreamDefault [
             "time.google.com"
             "0.arch.pool.ntp.org"
             "1.arch.pool.ntp.org"
@@ -421,39 +332,23 @@ in
         };
       })
 
-      # ================================================================
-      # Sysfs — THP
-      # Source: usr/lib/tmpfiles.d/thp.conf + thp-shrinker.conf
-      # ================================================================
       (lib.mkIf cfg.thp.enable {
         boot.kernel.sysfs.kernel.mm.transparent_hugepage = {
-          defrag = "defer+madvise";
-          khugepaged.max_ptes_none = 409;
+          defrag = upstreamDefault "defer+madvise";
+          khugepaged.max_ptes_none = upstreamDefault 409;
         };
       })
 
-      # ================================================================
-      # Tmpfiles — Coredump
-      # Source: usr/lib/tmpfiles.d/coredump.conf
-      # ================================================================
       (lib.mkIf cfg.coredump.enable {
         systemd.tmpfiles.rules = [
           "e /var/lib/systemd/coredump - - - 3d"
         ];
       })
 
-      # ================================================================
-      # NetworkManager DNS — use systemd-resolved
-      # Source: usr/lib/NetworkManager/conf.d/dns.conf
-      # ================================================================
       (lib.mkIf cfg.networkManager.enable {
-        networking.networkmanager.dns = lib.mkDefault "systemd-resolved";
+        networking.networkmanager.dns = upstreamDefault "systemd-resolved";
       })
 
-      # ================================================================
-      # Debuginfod — CachyOS symbol server
-      # Source: etc/debuginfod/cachyos.urls
-      # ================================================================
       (lib.mkIf cfg.debuginfod.enable {
         environment.debuginfodServers = [ "https://debuginfod.cachyos.org" ];
       })
