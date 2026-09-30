@@ -94,7 +94,7 @@ cachyos.settings = {
 | `storage.enable` | `true` | SATA ALPM + hdparm |
 | `thp.enable` | `true` | THP defrag + khugepaged |
 | `systemd.enable` | `true` | Systemd timeouts, limits, delegation, systemd-oomd slice policy (acts only while systemd-oomd runs, which NixOS does by default; the module does not switch it on) |
-| `timesyncd.enable` | `true` | NTP (Cloudflare + NixOS pool) |
+| `timesyncd.enable` | `true` | NTP (Cloudflare, with Google and the Arch pool as fallback) |
 | `networkManager.enable` | `true` | DNS via systemd-resolved |
 | `ntsync.enable` | `true` | NT sync module for Wine/Proton |
 | `debuginfod.enable` | `true` | CachyOS debuginfod server |
@@ -107,11 +107,12 @@ cachyos.settings = {
 
 The last-mirrored upstream commit is recorded in `upstream-version.json`. A daily GitHub Action checks [CachyOS-Settings](https://github.com/CachyOS/CachyOS-Settings) master; because this module is a hand-port (not a fetched build), it files a `remirror-needed` issue when upstream moves rather than auto-updating.
 
-Diverges from upstream only where upstream's value would break NixOS or cannot apply on it; everything else is ported as upstream ships it (re-check this list at each re-mirror):
+Every value is upstream's, landed through the NixOS option that owns the file. It differs from upstream only here (re-check this list at each re-mirror):
 
-- `vm.swappiness`: upstream's `70-cachyos-settings.conf` sets a flat 100 and its `30-zram.rules` raises it to 150 once zram0 initialises. The module sets 150 whenever its ZRAM half is on, to prefer compressing anonymous pages over evicting file cache, and 100 otherwise.
 - `kernel.unprivileged_userns_clone`: written as `-kernel.unprivileged_userns_clone`. The key comes from a CachyOS/Debian kernel patch, and the leading `-` makes systemd-sysctl skip it on a stock kernel (where unprivileged user namespaces are already on) instead of failing at activation.
 - Watchdog blacklist (`iTCO_wdt`, `sp5100_tco`, `wdat_wdt` from `modprobe.d/blacklist.conf`): upstream always blacklists them. The module does so unless `watchdog.enable` is set, so a host that needs its hardware watchdog can keep it.
+- systemd-oomd on user slices: upstream's `user-.slice.d` drop-in sets `ManagedOOMMemoryPressure=kill` at 80% on each user's slice. The module turns on `systemd.oomd.enableUserSlices`, which monitors `user.slice` and every slice of the user manager at the same limit instead, and sets `DefaultMemoryPressureLimit=80%` in `oomd.conf`, a file upstream does not ship. `ManagedOOMSwap=kill` lands on `user-.slice` and `system.slice` as upstream.
+- SATA link power: `powerManagement.scsiLinkPolicy` writes `max_performance` to every `scsi_host` without upstream's `link_power_management_supported=="1"` guard. NixOS refuses it next to `services.tlp`, so a TLP host sets `storage.enable = false`.
 
 Deliberately not ported (outside the module's settings scope; re-check this list at each re-mirror):
 

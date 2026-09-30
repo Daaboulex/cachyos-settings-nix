@@ -91,13 +91,6 @@ let
         echo 100 > /sys/kernel/mm/xswap/create
     fi
   '';
-
-  oomdPerSliceDefaults = ''
-    [Slice]
-    ManagedOOMSwap=kill
-    ManagedOOMMemoryPressure=kill
-    ManagedOOMMemoryPressureLimit=80%
-  '';
 in
 {
   # ==================================================================
@@ -112,9 +105,11 @@ in
       // {
         default = true;
       };
-    ioSchedulers.enable = lib.mkEnableOption "I/O scheduler udev rules (bfq/mq-deadline/none)" // {
-      default = true;
-    };
+    ioSchedulers.enable =
+      lib.mkEnableOption "I/O scheduler udev rules (bfq for rotational disks, mq-deadline for SSD and eMMC, kyber for NVMe)"
+      // {
+        default = true;
+      };
     audio.enable =
       lib.mkEnableOption "Audio optimizations (PCI latency, power save, HPET/RTC perms, CPU DMA latency, PAM rtprio/nice)"
       // {
@@ -133,9 +128,11 @@ in
       // {
         default = true;
       };
-    timesyncd.enable = lib.mkEnableOption "NTP time synchronization (Cloudflare + NixOS pool)" // {
-      default = true;
-    };
+    timesyncd.enable =
+      lib.mkEnableOption "NTP time synchronization (Cloudflare, with Google and the Arch pool as fallback)"
+      // {
+        default = true;
+      };
     networkManager.enable = lib.mkEnableOption "NetworkManager DNS via systemd-resolved" // {
       default = true;
     };
@@ -168,7 +165,7 @@ in
       {
         boot.kernel.sysctl = {
           # Memory & I/O Management
-          "vm.swappiness" = if cfg.zram.enable then 150 else 100;
+          "vm.swappiness" = 100;
           # Lower VFS cache pressure to keep directory/inode caches longer
           "vm.vfs_cache_pressure" = 50;
           # Process starts writing dirty data at 256MB
@@ -221,12 +218,6 @@ in
           priority = 100;
         };
 
-        # Source: usr/lib/udev/rules.d/30-zram.rules
-        # When ZRAM is active, override swappiness to 150 and disable zswap
-        services.udev.extraRules = ''
-          ACTION=="change", KERNEL=="zram0", ATTR{initstate}=="1", SYSCTL{vm.swappiness}="150", RUN+="${pkgs.bash}/bin/bash -c 'echo N > /sys/module/zswap/parameters/enabled'"
-        '';
-
         systemd.generators.xswap-generator = "${xswapGenerator}";
         systemd.packages = [
           (pkgs.writeTextDir "lib/systemd/system/systemd-zram-setup@.service.d/xswap.conf" ''
@@ -234,6 +225,13 @@ in
             ConditionPathExistsGlob=!/sys/kernel/mm/xswap/type*
           '')
         ];
+      })
+
+      # Source: usr/lib/udev/rules.d/30-zram.rules
+      (lib.mkIf config.zramSwap.enable {
+        services.udev.extraRules = ''
+          ACTION=="change", KERNEL=="zram0", ATTR{initstate}=="1", SYSCTL{vm.swappiness}="150", RUN+="${pkgs.bash}/bin/bash -c 'echo N > /sys/module/zswap/parameters/enabled'"
+        '';
       })
 
       # ================================================================
@@ -253,11 +251,6 @@ in
           KERNEL=="hpet", GROUP="audio"
           # 99-cpu-dma-latency: Audio group access to CPU DMA latency
           DEVPATH=="/devices/virtual/misc/cpu_dma_latency", OWNER="root", GROUP="audio", MODE="0660"
-        '';
-
-        # Modprobe: disable snd-hda-intel power saving at module level
-        boot.extraModprobeConfig = ''
-          options snd-hda-intel power_save=0
         '';
 
         # PCI latency service
@@ -295,9 +288,9 @@ in
       # Source: usr/lib/udev/rules.d/69-hdparm.rules
       # ================================================================
       (lib.mkIf cfg.storage.enable {
+        powerManagement.scsiLinkPolicy = "max_performance";
+
         services.udev.extraRules = ''
-          # 50-sata: SATA Active Link Power Management
-          ACTION=="add", SUBSYSTEM=="scsi_host", KERNEL=="host*", ATTR{link_power_management_supported}=="1", ATTR{link_power_management_policy}=="*", ATTR{link_power_management_policy}="max_performance"
           # 69-hdparm: HDD tuning (-B 254 -S 0)
           ACTION=="add|change", KERNEL=="sd[a-z]", ATTR{queue/rotational}=="1", ENV{ID_USB_DRIVER}=="", ENV{ID_BUS}=="ata", RUN+="${pkgs.hdparm}/bin/hdparm -B 254 -S 0 /dev/%k"
         '';
@@ -360,7 +353,7 @@ in
       # ================================================================
       (lib.mkIf cfg.systemd.enable {
         # Source: usr/lib/systemd/journald.conf.d/00-journal-size.conf
-        services.journald.settings.Journal.SystemMaxUse = "50M";
+        services.journald.settings.Journal.SystemMaxUse = lib.mkDefault "50M";
 
         # Source: usr/lib/systemd/system.conf.d/00-timeout.conf + 10-limits.conf
         systemd.settings.Manager = {
@@ -369,14 +362,12 @@ in
           DefaultLimitNOFILE = "2048:2097152";
         };
 
-        # Source: usr/lib/systemd/user.conf.d/10-limits.conf
-        #       + usr/lib/systemd/user.conf.d/00-timeout.conf (upstream a469516)
-        environment.etc."systemd/user.conf.d/10-cachyos-limits.conf".text = ''
-          [Manager]
-          DefaultLimitNOFILE=1024:1048576
-          DefaultTimeoutStartSec=15s
-          DefaultTimeoutStopSec=10s
-        '';
+        # Source: usr/lib/systemd/user.conf.d/00-timeout.conf + 10-limits.conf
+        systemd.user.settings.Manager = {
+          DefaultTimeoutStartSec = "15s";
+          DefaultTimeoutStopSec = "10s";
+          DefaultLimitNOFILE = "1024:1048576";
+        };
 
         # Source: usr/lib/systemd/system/user@.service.d/delegate.conf
         systemd.services."user@" = {
@@ -390,14 +381,26 @@ in
           serviceConfig.LogLevelMax = "info";
         };
 
-        systemd.packages = [
-          (pkgs.writeTextDir "lib/systemd/system/system.slice.d/10-oomd-per-slice-defaults.conf" oomdPerSliceDefaults)
-          (pkgs.writeTextDir "lib/systemd/system/user-.slice.d/10-oomd-per-slice-defaults.conf" oomdPerSliceDefaults)
-          (pkgs.writeTextDir "lib/systemd/system/session.slice.d/10-ignore-session-slice.conf" ''
-            [Slice]
-            ManagedOOMPreference=omit
-          '')
-        ];
+        # Source: usr/lib/systemd/system/{system,user-}.slice.d/10-oomd-per-slice-defaults.conf
+        systemd.oomd = {
+          enableSystemSlice = true;
+          enableUserSlices = true;
+          settings.OOM.DefaultMemoryPressureLimit = "80%";
+        };
+        systemd.slices.system = {
+          overrideStrategy = "asDropin";
+          sliceConfig.ManagedOOMSwap = "kill";
+        };
+        systemd.slices."user-" = {
+          overrideStrategy = "asDropin";
+          sliceConfig.ManagedOOMSwap = "kill";
+        };
+
+        # Source: usr/lib/systemd/user/session.slice.d/10-ignore-session-slice.conf
+        systemd.user.slices.session = {
+          overrideStrategy = "asDropin";
+          sliceConfig.ManagedOOMPreference = "omit";
+        };
       })
 
       # ================================================================
@@ -410,23 +413,23 @@ in
           servers = [ "time.cloudflare.com" ];
           fallbackServers = [
             "time.google.com"
-            "0.nixos.pool.ntp.org"
-            "1.nixos.pool.ntp.org"
-            "2.nixos.pool.ntp.org"
-            "3.nixos.pool.ntp.org"
+            "0.arch.pool.ntp.org"
+            "1.arch.pool.ntp.org"
+            "2.arch.pool.ntp.org"
+            "3.arch.pool.ntp.org"
           ];
         };
       })
 
       # ================================================================
-      # Tmpfiles — THP
+      # Sysfs — THP
       # Source: usr/lib/tmpfiles.d/thp.conf + thp-shrinker.conf
       # ================================================================
       (lib.mkIf cfg.thp.enable {
-        systemd.tmpfiles.rules = [
-          "w! /sys/kernel/mm/transparent_hugepage/defrag - - - - defer+madvise"
-          "w! /sys/kernel/mm/transparent_hugepage/khugepaged/max_ptes_none - - - - 409"
-        ];
+        boot.kernel.sysfs.kernel.mm.transparent_hugepage = {
+          defrag = "defer+madvise";
+          khugepaged.max_ptes_none = 409;
+        };
       })
 
       # ================================================================
@@ -445,7 +448,6 @@ in
       # ================================================================
       (lib.mkIf cfg.networkManager.enable {
         networking.networkmanager.dns = lib.mkDefault "systemd-resolved";
-        services.resolved.enable = lib.mkDefault true;
       })
 
       # ================================================================
@@ -453,7 +455,7 @@ in
       # Source: etc/debuginfod/cachyos.urls
       # ================================================================
       (lib.mkIf cfg.debuginfod.enable {
-        environment.variables.DEBUGINFOD_URLS = lib.mkDefault "https://debuginfod.cachyos.org";
+        environment.debuginfodServers = [ "https://debuginfod.cachyos.org" ];
       })
     ]
   );
