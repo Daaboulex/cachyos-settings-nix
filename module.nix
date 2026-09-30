@@ -133,9 +133,6 @@ in
     ntsync.enable = lib.mkEnableOption "NT sync kernel module for Wine/Proton" // {
       default = true;
     };
-    debuginfod.enable = lib.mkEnableOption "CachyOS debuginfod symbol server" // {
-      default = true;
-    };
     coredump.enable = lib.mkEnableOption "Coredump cleanup (3-day retention)" // {
       default = true;
     };
@@ -347,10 +344,6 @@ in
 
       (lib.mkIf cfg.networkManager.enable {
         networking.networkmanager.dns = upstreamDefault "systemd-resolved";
-      })
-
-      (lib.mkIf cfg.debuginfod.enable {
-        environment.debuginfodServers = [ "https://debuginfod.cachyos.org" ];
       })
     ]
   );

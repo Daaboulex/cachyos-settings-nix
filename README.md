@@ -25,7 +25,7 @@ A module-only Nix flake providing CachyOS-Settings as a standalone NixOS module:
 
 - **Module-only repo** — no packages output; imports as `nixosModules.default`
 - **Daily upstream tracking** — a GitHub Action checks `CachyOS-Settings` master daily and files a `remirror-needed` issue when upstream moves (this module is a hand-port; it never auto-edits)
-- **Scoped sub-toggles** — every concern (`zram`, `ioSchedulers`, `audio`, `storage`, `thp`, `systemd`, `timesyncd`, `networkManager`, `ntsync`, `debuginfod`, `coredump`, `watchdog`, `nvidia`, `amdgpuGcnCompat`) is independently toggleable
+- **Scoped sub-toggles** — every concern (`zram`, `ioSchedulers`, `audio`, `storage`, `thp`, `systemd`, `timesyncd`, `networkManager`, `ntsync`, `coredump`, `watchdog`, `nvidia`, `amdgpuGcnCompat`) is independently toggleable
 - **Module-instantiation check** — CI instantiates the module (enabled) via `nix flake check`, so activation-time errors surface, not just evaluation
 
 Provides sysctl tuning, udev rules, systemd tweaks, ZRAM, THP, I/O schedulers, audio optimizations, and more — matching upstream CachyOS defaults.
@@ -101,7 +101,6 @@ The last column names the upstream files each toggle ports, as paths in the Cach
 | `timesyncd.enable` | `true` | NTP (Cloudflare, with Google and the Arch pool as fallback) | `usr/lib/systemd/timesyncd.conf.d/10-timesyncd.conf` |
 | `networkManager.enable` | `true` | DNS via systemd-resolved | `usr/lib/NetworkManager/conf.d/dns.conf` |
 | `ntsync.enable` | `true` | NT sync module for Wine/Proton | `usr/lib/modules-load.d/ntsync.conf` |
-| `debuginfod.enable` | `true` | CachyOS debuginfod server | `etc/debuginfod/cachyos.urls` |
 | `coredump.enable` | `true` | Coredump cleanup (3-day) | `usr/lib/tmpfiles.d/coredump.conf` |
 | `watchdog.enable` | `false` | Keep the iTCO, SP5100 and WDAT watchdog drivers upstream blacklists | `usr/lib/modprobe.d/blacklist.conf` |
 | `nvidia.enable` | `false` | NVIDIA modprobe + udev tuning | `usr/lib/udev/rules.d/71-nvidia.rules`, `usr/lib/modprobe.d/nvidia.conf` |
@@ -123,6 +122,7 @@ Deliberately not ported (outside the module's settings scope; re-check this list
 - Wireless regdomain automation (`usr/lib/iw-set-regdomain`, `85-iw-regulatory.rules`, `cachyos-iw-set-regdomain.{path,service}`) -- on NixOS set the regulatory domain declaratively instead.
 - GNOME/GDM branding (`usr/share/glib-2.0/.../login-screen` override, `usr/share/icons/cachyos.svg`).
 - X11 touchpad defaults (`usr/share/X11/xorg.conf.d/20-touchpad.conf`) -- use `services.libinput` options.
+- The debuginfod server URL (`etc/debuginfod/cachyos.urls`) -- the server indexes CachyOS and Arch build ids; a binary built by Nix never matches, so every lookup would only wait for a 404.
 
 ## Development
 
