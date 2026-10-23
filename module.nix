@@ -81,71 +81,29 @@ let
       main "$@"
     '';
   };
-
-  xswapGenerator = pkgs.writeScript "xswap-generator" ''
-    #!${pkgs.bashInteractive}/bin/bash
-    if [[ -e /sys/kernel/mm/xswap && ! -n "$(compgen -G '/sys/kernel/mm/xswap/type*')" ]]; then
-        ${pkgs.coreutils}/bin/ln -s /dev/null /run/systemd/zram-generator.conf
-        echo 100 > /sys/kernel/mm/xswap/create
-    fi
-  '';
 in
 {
   options.cachyos.settings = {
-    enable = lib.mkEnableOption "CachyOS system optimizations (upstream-matched settings)";
+    enable = lib.mkEnableOption "the CachyOS settings areas switched on below; on its own it changes nothing";
 
-    zram.enable =
-      lib.mkEnableOption "ZRAM swap (zstd, 100% RAM), handed to xswap on a kernel that provides it"
-      // {
-        default = true;
-      };
-    ioSchedulers.enable =
-      lib.mkEnableOption "I/O scheduler udev rules (bfq for rotational disks, mq-deadline for SSD and eMMC, kyber for NVMe)"
-      // {
-        default = true;
-      };
-    audio.enable =
-      lib.mkEnableOption "Audio optimizations (PCI latency, power save, HPET/RTC perms, CPU DMA latency, PAM rtprio/nice)"
-      // {
-        default = true;
-      };
-    storage.enable = lib.mkEnableOption "SATA ALPM + hdparm for rotational disks" // {
-      default = true;
-    };
-    thp.enable =
-      lib.mkEnableOption "THP defrag (defer+madvise) and khugepaged shrinker (kernel 6.12+)"
-      // {
-        default = true;
-      };
-    systemd.enable =
-      lib.mkEnableOption "Systemd timeouts, NOFILE limits, journal size, cgroup delegation, rtkit, systemd-oomd slice policy"
-      // {
-        default = true;
-      };
-    timesyncd.enable =
-      lib.mkEnableOption "NTP time synchronization (Cloudflare, with Google and the Arch pool as fallback)"
-      // {
-        default = true;
-      };
-    networkManager.enable = lib.mkEnableOption "NetworkManager DNS via systemd-resolved" // {
-      default = true;
-    };
-    ntsync.enable = lib.mkEnableOption "NT sync kernel module for Wine/Proton" // {
-      default = true;
-    };
-    coredump.enable = lib.mkEnableOption "Coredump cleanup (3-day retention)" // {
-      default = true;
-    };
-    watchdog.enable = lib.mkEnableOption "the iTCO, SP5100 and WDAT hardware watchdog drivers, which upstream blacklists";
-
-    nvidia.enable = lib.mkEnableOption "NVIDIA modprobe + udev tuning (runtime PM, power management)";
-    amdgpuGcnCompat.enable = lib.mkEnableOption "Force amdgpu driver for GCN 1.0+ (SI) and GCN 2.x (CIK) GPUs";
+    sysctl.enable = lib.mkEnableOption "upstream's VM, kernel and network sysctls, and swappiness 150 with zswap off once a zram device is up";
+    zram.enable = lib.mkEnableOption "zram swap with upstream's values: zstd, up to 100% of RAM, priority 100";
+    ioSchedulers.enable = lib.mkEnableOption "I/O scheduler udev rules: bfq for rotational disks, mq-deadline for SSD and eMMC, kyber for NVMe";
+    audio.enable = lib.mkEnableOption "audio latency tuning: PCI latency timers, snd-hda-intel power saving off on AC, HPET/RTC and CPU DMA latency for the audio group, rtprio and nice limits, rtkit logging capped at info";
+    storage.enable = lib.mkEnableOption "SATA link power at max_performance and hdparm for rotational disks";
+    thp.enable = lib.mkEnableOption "THP defrag at defer+madvise and the khugepaged shrinker threshold";
+    ntsync.enable = lib.mkEnableOption "the ntsync kernel module, which Wine and Proton use for NT synchronization";
+    coredump.enable = lib.mkEnableOption "removal of core dumps older than three days";
+    serviceManager.enable = lib.mkEnableOption "systemd's start and stop timeouts and open-file limits for the system and user managers, and cgroup delegation to user managers";
+    journal.enable = lib.mkEnableOption "a 50M cap on the system journal";
+    oomd.enable = lib.mkEnableOption "systemd-oomd slice policy: kill on swap for system.slice, kill on swap and at 80% memory pressure for every slice of a user manager, session.slice left alone; it acts only while systemd-oomd runs";
+    watchdogBlacklist.enable = lib.mkEnableOption "the blacklist of the iTCO, SP5100 and WDAT hardware watchdog drivers";
+    nvidia.enable = lib.mkEnableOption "NVIDIA runtime power management on bind, and NVreg_InitializeSystemMemoryAllocations=0, which skips zeroing freshly allocated system memory for speed";
   };
 
   config = lib.mkIf cfg.enable (
     lib.mkMerge [
-
-      {
+      (lib.mkIf cfg.sysctl.enable {
         boot.kernel.sysctl = lib.mapAttrs (_: upstreamDefault) {
           "vm.swappiness" = 100;
           "vm.vfs_cache_pressure" = 50;
@@ -155,23 +113,16 @@ in
           "vm.page-cluster" = 0;
 
           "kernel.nmi_watchdog" = 0;
-          "-kernel.unprivileged_userns_clone" = 1;
           "kernel.printk" = "3 3 3 3";
           "kernel.kptr_restrict" = 2;
           "kernel.sysrq" = 1;
 
           "net.core.netdev_max_backlog" = 4096;
-
-          "fs.file-max" = 2097152;
         };
-      }
 
-      (lib.mkIf (!cfg.watchdog.enable) {
-        boot.blacklistedKernelModules = [
-          "iTCO_wdt"
-          "sp5100_tco"
-          "wdat_wdt"
-        ];
+        services.udev.extraRules = lib.mkIf config.zramSwap.enable ''
+          ACTION=="change", KERNEL=="zram0", ATTR{initstate}=="1", SYSCTL{vm.swappiness}="150", RUN+="${pkgs.bash}/bin/bash -c 'echo N > /sys/module/zswap/parameters/enabled'"
+        '';
       })
 
       (lib.mkIf cfg.zram.enable {
@@ -181,20 +132,14 @@ in
           memoryPercent = upstreamDefault 100;
           priority = upstreamDefault 100;
         };
-
-        systemd.generators.xswap-generator = "${xswapGenerator}";
-        systemd.packages = [
-          (pkgs.writeTextDir "lib/systemd/system/systemd-zram-setup@.service.d/xswap.conf" ''
-            [Unit]
-            ConditionPathExistsGlob=!/sys/kernel/mm/xswap/type*
-          '')
-        ];
       })
 
-      (lib.mkIf config.zramSwap.enable {
-        services.udev.extraRules = ''
-          ACTION=="change", KERNEL=="zram0", ATTR{initstate}=="1", SYSCTL{vm.swappiness}="150", RUN+="${pkgs.bash}/bin/bash -c 'echo N > /sys/module/zswap/parameters/enabled'"
-        '';
+      (lib.mkIf cfg.watchdogBlacklist.enable {
+        boot.blacklistedKernelModules = [
+          "iTCO_wdt"
+          "sp5100_tco"
+          "wdat_wdt"
+        ];
       })
 
       (lib.mkIf cfg.audio.enable {
@@ -214,6 +159,11 @@ in
             Type = "oneshot";
             ExecStart = "${pciLatencyScript}";
           };
+        };
+
+        systemd.services.rtkit-daemon = {
+          overrideStrategy = "asDropin";
+          serviceConfig.LogLevelMax = upstreamDefault "info";
         };
 
         security.pam.loginLimits = [
@@ -259,20 +209,11 @@ in
         '';
       })
 
-      (lib.mkIf cfg.amdgpuGcnCompat.enable {
-        boot.extraModprobeConfig = ''
-          options amdgpu si_support=1 cik_support=1
-          options radeon si_support=0 cik_support=0
-        '';
-      })
-
       (lib.mkIf cfg.ntsync.enable {
         boot.kernelModules = [ "ntsync" ];
       })
 
-      (lib.mkIf cfg.systemd.enable {
-        services.journald.settings.Journal.SystemMaxUse = upstreamDefault "50M";
-
+      (lib.mkIf cfg.serviceManager.enable {
         systemd.settings.Manager = lib.mapAttrs (_: upstreamDefault) {
           DefaultTimeoutStartSec = "15s";
           DefaultTimeoutStopSec = "10s";
@@ -289,43 +230,31 @@ in
           overrideStrategy = "asDropin";
           serviceConfig.Delegate = upstreamDefault "cpu cpuset io memory pids";
         };
+      })
 
-        systemd.services.rtkit-daemon = {
-          overrideStrategy = "asDropin";
-          serviceConfig.LogLevelMax = upstreamDefault "info";
-        };
+      (lib.mkIf cfg.journal.enable {
+        services.journald.settings.Journal.SystemMaxUse = upstreamDefault "50M";
+      })
 
+      (lib.mkIf cfg.oomd.enable {
         systemd.oomd.enableSystemSlice = upstreamDefault true;
         systemd.slices.system = {
           overrideStrategy = "asDropin";
           sliceConfig.ManagedOOMSwap = upstreamDefault "kill";
         };
-        systemd.slices."user-" = {
-          overrideStrategy = "asDropin";
-          sliceConfig = lib.mapAttrs (_: upstreamDefault) {
-            ManagedOOMSwap = "kill";
-            ManagedOOMMemoryPressure = "kill";
-            ManagedOOMMemoryPressureLimit = "80%";
-          };
-        };
+
+        systemd.packages = [
+          (pkgs.writeTextDir "lib/systemd/user/slice.d/10-oomd-per-slice-defaults.conf" ''
+            [Slice]
+            ManagedOOMSwap=kill
+            ManagedOOMMemoryPressure=kill
+            ManagedOOMMemoryPressureLimit=80%
+          '')
+        ];
 
         systemd.user.slices.session = {
           overrideStrategy = "asDropin";
           sliceConfig.ManagedOOMPreference = upstreamDefault "omit";
-        };
-      })
-
-      (lib.mkIf cfg.timesyncd.enable {
-        services.timesyncd = {
-          enable = upstreamDefault true;
-          servers = upstreamDefault [ "time.cloudflare.com" ];
-          fallbackServers = upstreamDefault [
-            "time.google.com"
-            "0.arch.pool.ntp.org"
-            "1.arch.pool.ntp.org"
-            "2.arch.pool.ntp.org"
-            "3.arch.pool.ntp.org"
-          ];
         };
       })
 
@@ -340,10 +269,6 @@ in
         systemd.tmpfiles.rules = [
           "e /var/lib/systemd/coredump - - - 3d"
         ];
-      })
-
-      (lib.mkIf cfg.networkManager.enable {
-        networking.networkmanager.dns = upstreamDefault "systemd-resolved";
       })
     ]
   );

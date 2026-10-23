@@ -25,7 +25,7 @@ A module-only Nix flake providing CachyOS-Settings as a standalone NixOS module:
 
 - **Module-only repo** — no packages output; imports as `nixosModules.default`
 - **Daily upstream tracking** — a GitHub Action checks `CachyOS-Settings` master daily and files a `remirror-needed` issue when upstream moves (this module is a hand-port; it never auto-edits)
-- **Scoped sub-toggles** — every concern (`zram`, `ioSchedulers`, `audio`, `storage`, `thp`, `systemd`, `timesyncd`, `networkManager`, `ntsync`, `coredump`, `watchdog`, `nvidia`, `amdgpuGcnCompat`) is independently toggleable
+- **Opt-in areas** — every area (`sysctl`, `zram`, `ioSchedulers`, `audio`, `storage`, `thp`, `ntsync`, `coredump`, `serviceManager`, `journal`, `oomd`, `watchdogBlacklist`, `nvidia`) is off until set; `enable` alone changes nothing
 - **Module-instantiation check** — CI instantiates the module (enabled) via `nix flake check`, so activation-time errors surface, not just evaluation
 
 Provides sysctl tuning, udev rules, systemd tweaks, ZRAM, THP, I/O schedulers, audio optimizations, and more — matching upstream CachyOS defaults.
@@ -71,58 +71,71 @@ modules = [
 ];
 ```
 
-Enable in your configuration:
+Enable in your configuration. Every area is opt-in; `enable` alone changes
+nothing:
 
 ```nix
 cachyos.settings = {
   enable = true;
-  # All sub-options default to true except GPU-specific ones and watchdog:
-  # nvidia.enable = false;        # Enable for NVIDIA GPUs
-  # amdgpuGcnCompat.enable = false; # Enable for GCN 1.0/2.x GPUs
-  # watchdog.enable = false;      # Enable to keep the iTCO/SP5100/WDAT hardware watchdog upstream blacklists
+  sysctl.enable = true;
+  ioSchedulers.enable = true;
+  audio.enable = true;
+  serviceManager.enable = true;
+  oomd.enable = true;
 };
 ```
 
-Every single-valued setting the module lands is a `lib.mkOverride 500`, the priority nixpkgs' own installer profiles and editor modules use: it beats the `mkDefault` values NixOS itself sets (`kernel.kptr_restrict`, `kernel.printk`), and a host overrides it with a plain line, while two modules that set the same value at the same priority fail evaluation as a conflict instead of one silently winning. The udev rules, modprobe lines, kernel module lists, tmpfiles rules, PAM limits and debuginfod servers stay at the default priority and merge with the host's own, as the module system does for lists and lines; a lower priority there would drop the module's whole contribution the moment any other module adds to the same option, so those are switched off with their toggle, never overridden.
+Every single-valued setting the module lands is a `lib.mkOverride 500`, the priority nixpkgs' own installer profiles and editor modules use: it beats the `mkDefault` values NixOS itself sets (`kernel.kptr_restrict`, `kernel.printk`), and a host overrides it with a plain line, while two modules that set the same value at the same priority fail evaluation as a conflict instead of one silently winning. The udev rules, modprobe lines, kernel module lists, tmpfiles rules and PAM limits stay at the default priority and merge with the host's own, as the module system does for lists and lines; a lower priority there would drop the module's whole contribution the moment any other module adds to the same option, so those are switched off with their area, never overridden.
 
 ## Options
 
-The last column names the upstream files each toggle ports, as paths in the CachyOS-Settings tree at the commit `upstream-version.json` pins.
+Every option is a boolean that defaults to `false`. The last column names the upstream files each area ports, as paths in the CachyOS-Settings tree at the commit `upstream-version.json` pins.
 
-| Option | Default | Description | Upstream files |
-|--------|---------|-------------|----------------|
-| `cachyos.settings.enable` | `false` | Master toggle; the sysctls, and the zram0 rule whenever `zramSwap.enable` is on, whoever set it | `usr/lib/sysctl.d/70-cachyos-settings.conf`, `usr/lib/udev/rules.d/30-zram.rules` |
-| `zram.enable` | `true` | ZRAM swap (zstd, 100% RAM), handed to xswap on a kernel that provides it | `usr/lib/systemd/zram-generator.conf`, the xswap generator and its `systemd-zram-setup@.service` drop-in |
-| `ioSchedulers.enable` | `true` | I/O scheduler udev rules: bfq for rotational disks, mq-deadline for SSD and eMMC, kyber for NVMe | `usr/lib/udev/rules.d/60-ioschedulers.rules` |
-| `audio.enable` | `true` | Audio optimizations: PCI latency timers (80 cycles for sound cards, 20 for the rest), snd-hda-intel power saving off on AC, HPET/RTC and CPU DMA latency for the audio group, rtprio and nice limits | `usr/lib/udev/rules.d/20-audio-pm.rules` with its `audio-pm-ctl` helper, `40-hpet-permissions.rules`, `99-cpu-dma-latency.rules`, `usr/lib/systemd/system/pci-latency.service`, `etc/security/limits.d/20-audio.conf` |
-| `storage.enable` | `true` | SATA ALPM + hdparm | `usr/lib/udev/rules.d/50-sata.rules`, `69-hdparm.rules` |
-| `thp.enable` | `true` | THP defrag + khugepaged | `usr/lib/tmpfiles.d/thp.conf`, `thp-shrinker.conf` |
-| `systemd.enable` | `true` | Systemd timeouts, limits, delegation, systemd-oomd slice policy (acts only while systemd-oomd runs, which NixOS does by default; the module does not switch it on) | `usr/lib/systemd/journald.conf.d/00-journal-size.conf`, `system.conf.d/00-timeout.conf`, `system.conf.d/10-limits.conf`, `user.conf.d/00-timeout.conf`, `user.conf.d/10-limits.conf`, `system/user@.service.d/delegate.conf`, `system/rtkit-daemon.service.d/override.conf`, `system/system.slice.d/10-oomd-per-slice-defaults.conf`, `system/user-.slice.d/10-oomd-per-slice-defaults.conf`, `user/session.slice.d/10-ignore-session-slice.conf` |
-| `timesyncd.enable` | `true` | NTP (Cloudflare, with Google and the Arch pool as fallback) | `usr/lib/systemd/timesyncd.conf.d/10-timesyncd.conf` |
-| `networkManager.enable` | `true` | DNS via systemd-resolved | `usr/lib/NetworkManager/conf.d/dns.conf` |
-| `ntsync.enable` | `true` | NT sync module for Wine/Proton | `usr/lib/modules-load.d/ntsync.conf` |
-| `coredump.enable` | `true` | Coredump cleanup (3-day) | `usr/lib/tmpfiles.d/coredump.conf` |
-| `watchdog.enable` | `false` | Keep the iTCO, SP5100 and WDAT watchdog drivers upstream blacklists | `usr/lib/modprobe.d/blacklist.conf` |
-| `nvidia.enable` | `false` | NVIDIA modprobe + udev tuning | `usr/lib/udev/rules.d/71-nvidia.rules`, `usr/lib/modprobe.d/nvidia.conf` |
-| `amdgpuGcnCompat.enable` | `false` | Force amdgpu for GCN 1.0+/2.x | `usr/lib/modprobe.d/amdgpu.conf` |
+| Option | Description | Upstream files |
+|--------|-------------|----------------|
+| `cachyos.settings.enable` | Lets the areas below apply; changes nothing on its own | |
+| `sysctl.enable` | VM, kernel and network sysctls; swappiness 150 and zswap off once a zram device is up, whoever set zram up | `usr/lib/sysctl.d/70-cachyos-settings.conf`, `usr/lib/udev/rules.d/30-zram.rules` |
+| `zram.enable` | zram swap: zstd, up to 100% of RAM, priority 100 | `usr/lib/systemd/zram-generator.conf` |
+| `ioSchedulers.enable` | bfq for rotational disks, mq-deadline for SSD and eMMC, kyber for NVMe | `usr/lib/udev/rules.d/60-ioschedulers.rules` |
+| `audio.enable` | PCI latency timers (80 cycles for sound cards, 20 for the rest), snd-hda-intel power saving off on AC, HPET/RTC and CPU DMA latency for the audio group, rtprio and nice limits, rtkit logging capped at info | `usr/lib/udev/rules.d/20-audio-pm.rules` with its `audio-pm-ctl` helper, `40-hpet-permissions.rules`, `99-cpu-dma-latency.rules`, `usr/lib/systemd/system/pci-latency.service`, `system/rtkit-daemon.service.d/override.conf`, `etc/security/limits.d/20-audio.conf` |
+| `storage.enable` | SATA ALPM at max_performance, hdparm for rotational disks | `usr/lib/udev/rules.d/50-sata.rules`, `69-hdparm.rules` |
+| `thp.enable` | THP defrag at defer+madvise, khugepaged shrinker | `usr/lib/tmpfiles.d/thp.conf`, `thp-shrinker.conf` |
+| `ntsync.enable` | ntsync module for Wine and Proton | `usr/lib/modules-load.d/ntsync.conf` |
+| `coredump.enable` | Core dumps removed after three days | `usr/lib/tmpfiles.d/coredump.conf` |
+| `serviceManager.enable` | Start and stop timeouts and open-file limits for the system and user managers, cgroup delegation to user managers | `usr/lib/systemd/system.conf.d/00-timeout.conf`, `10-limits.conf`, `user.conf.d/00-timeout.conf`, `10-limits.conf`, `system/user@.service.d/delegate.conf` |
+| `journal.enable` | System journal capped at 50M | `usr/lib/systemd/journald.conf.d/00-journal-size.conf` |
+| `oomd.enable` | systemd-oomd slice policy; acts only while systemd-oomd runs, which NixOS does by default | `usr/lib/systemd/system/system.slice.d/10-oomd-per-slice-defaults.conf`, `user/slice.d/10-oomd-per-slice-defaults.conf`, `user/session.slice.d/10-ignore-session-slice.conf` |
+| `watchdogBlacklist.enable` | Blacklist the iTCO, SP5100 and WDAT hardware watchdog drivers | `usr/lib/modprobe.d/blacklist.conf` |
+| `nvidia.enable` | Runtime power management on bind, and `NVreg_InitializeSystemMemoryAllocations=0`, which skips zeroing freshly allocated system memory for speed | `usr/lib/udev/rules.d/71-nvidia.rules`, `usr/lib/modprobe.d/nvidia.conf` |
 
 ## Upstream Tracking
 
-The last-mirrored upstream commit is recorded in `upstream-version.json`. A daily GitHub Action checks [CachyOS-Settings](https://github.com/CachyOS/CachyOS-Settings) master; because this module is a hand-port (not a fetched build), it files a `remirror-needed` issue when upstream moves rather than auto-updating.
+The last-mirrored upstream commit is recorded in `upstream-version.json`. A daily GitHub Action checks [CachyOS-Settings](https://github.com/CachyOS/CachyOS-Settings) master; because this module is a hand-port, it files one `remirror-needed` issue when upstream moves and keeps it open, with the days since it opened, until the marker is advanced.
 
 Every value is upstream's, landed through the NixOS option that owns the file. It differs from upstream only here (re-check this list at each re-mirror):
 
-- `kernel.unprivileged_userns_clone`: written as `-kernel.unprivileged_userns_clone`. The key comes from a CachyOS/Debian kernel patch, and the leading `-` makes systemd-sysctl skip it on a stock kernel (where unprivileged user namespaces are already on) instead of failing at activation.
-- Watchdog blacklist (`iTCO_wdt`, `sp5100_tco`, `wdat_wdt` from `modprobe.d/blacklist.conf`): upstream always blacklists them. The module does so unless `watchdog.enable` is set, so a host that needs its hardware watchdog can keep it.
+- The watchdog blacklist is an area of its own; upstream always blacklists the drivers.
 - SATA link power: `powerManagement.scsiLinkPolicy` writes `max_performance` to every `scsi_host` without upstream's `link_power_management_supported=="1"` guard. NixOS refuses it next to `services.tlp`, so a TLP host sets `powerManagement.scsiLinkPolicy = null` (keeping the hdparm rule) or `storage.enable = false`.
+- The user manager's `slice.d` drop-in is shipped as the upstream file through `systemd.packages`, because NixOS has no option for a drop-in that applies to every slice.
 
-Deliberately not ported (outside the module's settings scope; re-check this list at each re-mirror):
+Left to NixOS, which already has the switch (re-check at each re-mirror):
 
-- `usr/bin` user tools (`game-performance`, `cachyos-bugreport.sh`, `dlss-swapper`, `dlss-swapper-dll`, `kerver`, `paste-cachyos`, `sbctl-batch-sign`, `topmem`, `zink-run`) -- interactive tools, not system settings; `pci-latency` is the exception, ported as a systemd service.
-- Wireless regdomain automation (`usr/lib/iw-set-regdomain`, `85-iw-regulatory.rules`, `cachyos-iw-set-regdomain.{path,service}`) -- on NixOS set the regulatory domain declaratively instead.
+- `usr/lib/NetworkManager/conf.d/dns.conf`: NixOS points NetworkManager at systemd-resolved whenever `services.resolved.enable` is on.
+- `usr/lib/modprobe.d/amdgpu.conf`: `hardware.amdgpu.legacySupport.enable` sets the same four parameters.
+- `usr/lib/systemd/timesyncd.conf.d/10-timesyncd.conf`: NixOS runs timesyncd by default with its own pool; upstream's fallback servers are Arch's vendor zone, which belongs to Arch. Set `services.timesyncd.servers` for Cloudflare.
+- The upstream package enabling `systemd-oomd`: NixOS enables it by default.
+- `ananicy-cpp` with the CachyOS rules, which the upstream package depends on: `services.ananicy` with `rulesProvider = pkgs.ananicy-rules-cachyos`.
+
+Deliberately not ported, because they do nothing useful on NixOS (re-check this list at each re-mirror):
+
+- `usr/bin` user tools (`game-performance`, `cachyos-bugreport.sh`, `dlss-swapper`, `dlss-swapper-dll`, `kerver`, `paste-cachyos`, `sbctl-batch-sign`, `topmem`, `zink-run`): launchers and tools built around pacman and CachyOS's paste service; `pci-latency` is the exception, ported as a systemd service.
+- Wireless regdomain automation (`usr/lib/iw-set-regdomain`, `85-iw-regulatory.rules`, `cachyos-iw-set-regdomain.{path,service}`): set the regulatory domain declaratively instead.
+- The xswap generator and its `systemd-zram-setup@.service` drop-in: they act only on a kernel exposing `/sys/kernel/mm/xswap`, a patch series neither mainline nor the CachyOS 7.3 kernel carries.
+- `fs.file-max = 2097152` from the sysctl file: systemd already raises the limit to its maximum at boot, so upstream's value lowers it.
+- `kernel.unprivileged_userns_clone = 1` from the sysctl file: the key exists only on patched kernels, where 1 is already the default (CachyOS 7.3 `kernel/fork.c:135`).
 - GNOME/GDM branding (`usr/share/glib-2.0/.../login-screen` override, `usr/share/icons/cachyos.svg`).
-- X11 touchpad defaults (`usr/share/X11/xorg.conf.d/20-touchpad.conf`) -- use `services.libinput` options.
-- The debuginfod server URL (`etc/debuginfod/cachyos.urls`) -- the server indexes CachyOS and Arch build ids; a binary built by Nix never matches, so every lookup would only wait for a 404.
+- X11 touchpad defaults (`usr/share/X11/xorg.conf.d/20-touchpad.conf`): NixOS's libinput already enables tap-to-click.
+- The debuginfod server URL (`etc/debuginfod/cachyos.urls`): the server indexes CachyOS and Arch build ids; a binary built by Nix never matches, so every lookup would only wait for a 404.
 
 ## Development
 

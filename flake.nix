@@ -26,16 +26,56 @@
       imports = [ inputs.std.flakeModules.base ];
 
       perSystem =
-        { system, ... }:
+        { pkgs, system, ... }:
+        let
+          everyArea.cachyos.settings = {
+            enable = true;
+            sysctl.enable = true;
+            zram.enable = true;
+            ioSchedulers.enable = true;
+            audio.enable = true;
+            storage.enable = true;
+            thp.enable = true;
+            ntsync.enable = true;
+            coredump.enable = true;
+            serviceManager.enable = true;
+            journal.enable = true;
+            oomd.enable = true;
+            watchdogBlacklist.enable = true;
+            nvidia.enable = true;
+          };
+          userUnits =
+            (inputs.nixpkgs.lib.nixosSystem {
+              inherit system;
+              modules = [
+                ./module.nix
+                everyArea
+                {
+                  boot.isContainer = true;
+                  system.stateVersion = inputs.nixpkgs.lib.trivial.release;
+                }
+              ];
+            }).config.environment.etc."systemd/user".source;
+        in
         {
-          # Instantiate the module (enabled) so CI catches activation-time
-          # failures, not just that it evaluates as a definition.
           checks.module-eval = inputs.std.lib.nixosModuleCheck {
             inherit (inputs) nixpkgs;
             inherit system;
             module = ./module.nix;
-            config.cachyos.settings.enable = true;
+            config = everyArea;
           };
+
+          checks.oomd-user-dropins = pkgs.runCommand "oomd-user-dropins" { } ''
+            if ! grep -qx 'ManagedOOMMemoryPressureLimit=80%' ${userUnits}/slice.d/10-oomd-per-slice-defaults.conf; then
+              echo "the per-slice oomd defaults are not in the user manager's slice.d"
+              exit 1
+            fi
+            if ! grep -qx 'ManagedOOMPreference=omit' ${userUnits}/session.slice.d/overrides.conf; then
+              echo "session.slice in the user manager does not carry ManagedOOMPreference=omit"
+              exit 1
+            fi
+            touch "$out"
+          '';
         };
 
       flake.nixosModules.default = import ./module.nix;
