@@ -30,14 +30,16 @@ err() { echo "::error::$*"; }
 check_suite() {
   local clog rc
   clog=$(mktemp)
-  nix flake check --no-eval-cache --print-build-logs 2>&1 | tee "$clog"
+  nix flake check --keep-going --no-eval-cache --print-build-logs 2>&1 | tee "$clog"
   rc=${PIPESTATUS[0]}
   if [ "$rc" -eq 0 ]; then
     rm -f "$clog"
     return 0
   fi
   err "Check suite failed"
-  if grep -qE "Cannot build '/nix/store/[^']+\.drv'" "$clog"; then
+  local plain
+  plain=$(sed 's/\x1b\[[0-9;]*m//g' "$clog")
+  if grep -qE "Cannot build '/nix/store/[^']+\.drv'" <<<"$plain"; then
     output "error_type" "build-error"
   else
     output "error_type" "eval-error"
@@ -72,6 +74,11 @@ verify_artifact() {
   VERIFY_BINARY=$(echo "$CONFIG" | jq -r '.verify.binary // empty')
   read -ra VERIFY_ARGS <<<"$(echo "$CONFIG" | jq -r '.verify.args // "--version"')"
   VERIFY_CHECK=$(echo "$CONFIG" | jq -r '.verify.check // empty')
+  if { [ -n "$VERIFY_BINARY" ] || [ "$VERIFY_CHECK" = "elf" ]; } && ! command -v file >/dev/null; then
+    err "Artifact verification reads ELF headers with the 'file' tool, which is not on PATH"
+    output "error_type" "verification-error"
+    exit 1
+  fi
   nix build .#default
   if [ -n "$VERIFY_BINARY" ]; then
     ./result/bin/"$VERIFY_BINARY" "${VERIFY_ARGS[@]}" 2>&1 || {
@@ -269,7 +276,16 @@ if [ -z "$VARIANT_ASSETS" ] && [ "$TRACK_ONLY" != "true" ] &&
   [ -z "$PYREQ_FILE_PRESENT" ] && [ "$VERSION_SCHEME" = "literal" ] &&
   [ "$TAG_FILTER" = ".*" ] && [ "$DECLARED_HASHES" -gt 0 ]; then
   log "Standard case: delegating detection + hashes to nix-update"
-  if ! $NIX_UPDATE --flake default 2>&1; then
+  # --override-filename points nix-update at the file that holds the version
+  # literal: by default it rewrites the file that defines the package, and a
+  # repo whose package.nix only takes the version as an argument then changes
+  # nothing while nix-update has already seen the newer release.
+  NIX_UPDATE_LOG=$(mktemp)
+  SUBPACKAGE_ARGS=()
+  while IFS= read -r subpackage; do
+    SUBPACKAGE_ARGS+=(--subpackage "$subpackage")
+  done < <(echo "$CONFIG" | jq -r '.subpackages // [] | .[]')
+  if ! $NIX_UPDATE --flake default --override-filename "$VERSION_FILE" "${SUBPACKAGE_ARGS[@]}" 2>&1 | tee "$NIX_UPDATE_LOG"; then
     err "nix-update failed"
     output "updated" "false"
     output "error_type" "build-error"
@@ -277,6 +293,15 @@ if [ -z "$VARIANT_ASSETS" ] && [ "$TRACK_ONLY" != "true" ] &&
   fi
   NEW_VERSION=$(grep -oP "(?<![A-Za-z_])${VERSION_ATTR_RE}\s*[?=]\s*\"\K[^\"]+" \
     "$VERSION_FILE" 2>/dev/null | head -1 || true)
+  SEEN_VERSION=$(grep -m1 -oP '^Update \S+ -> \K\S+' "$NIX_UPDATE_LOG" || true)
+  rm -f "$NIX_UPDATE_LOG"
+  if [ "$NEW_VERSION" = "$CURRENT_VERSION" ] && [ -n "$SEEN_VERSION" ] && [ "$SEEN_VERSION" != "$CURRENT_VERSION" ]; then
+    err "nix-update found $SEEN_VERSION but $VERSION_FILE still says $CURRENT_VERSION: it rewrote nothing in the file the version lives in"
+    output "new_version" "$SEEN_VERSION"
+    output "updated" "false"
+    output "error_type" "config-error"
+    exit 1
+  fi
   output "new_version" "$NEW_VERSION"
   if [ "$NEW_VERSION" = "$CURRENT_VERSION" ]; then
     log "Already up to date ($CURRENT_VERSION)"
