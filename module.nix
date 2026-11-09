@@ -86,7 +86,7 @@ in
   options.cachyos.settings = {
     enable = lib.mkEnableOption "the CachyOS settings areas switched on below; on its own it changes nothing";
 
-    sysctl.enable = lib.mkEnableOption "upstream's VM, kernel and network sysctls, and swappiness 150 with zswap off once a zram device is up";
+    sysctl.enable = lib.mkEnableOption "upstream's VM, kernel and network sysctls with dirty memory as ratios of RAM, writeback caps on slow disks, and swappiness 150 with zswap off once a zram device is up";
     zram.enable = lib.mkEnableOption "zram swap with upstream's values: zstd, up to 100% of RAM, priority 100";
     ioSchedulers.enable = lib.mkEnableOption "I/O scheduler udev rules: bfq for rotational disks, mq-deadline for SSD and eMMC, kyber for NVMe";
     audio.enable = lib.mkEnableOption "audio latency tuning: PCI latency timers, snd-hda-intel power saving off on AC, HPET/RTC and CPU DMA latency for the audio group, rtprio and nice limits, rtkit logging capped at info";
@@ -107,9 +107,8 @@ in
         boot.kernel.sysctl = lib.mapAttrs (_: upstreamDefault) {
           "vm.swappiness" = 100;
           "vm.vfs_cache_pressure" = 50;
-          "vm.dirty_bytes" = 268435456;
-          "vm.dirty_background_bytes" = 67108864;
-          "vm.dirty_writeback_centisecs" = 1500;
+          "vm.dirty_ratio" = 10;
+          "vm.dirty_background_ratio" = 3;
           "vm.page-cluster" = 0;
 
           "kernel.nmi_watchdog" = 0;
@@ -120,9 +119,17 @@ in
           "net.core.netdev_max_backlog" = 4096;
         };
 
-        services.udev.extraRules = lib.mkIf config.zramSwap.enable ''
-          ACTION=="change", KERNEL=="zram0", ATTR{initstate}=="1", SYSCTL{vm.swappiness}="150", RUN+="${pkgs.bash}/bin/bash -c 'echo N > /sys/module/zswap/parameters/enabled'"
-        '';
+        services.udev.extraRules = lib.mkMerge [
+          (lib.mkIf config.zramSwap.enable ''
+            ACTION=="change", KERNEL=="zram0", ATTR{initstate}=="1", SYSCTL{vm.swappiness}="150", RUN+="${pkgs.bash}/bin/bash -c 'echo N > /sys/module/zswap/parameters/enabled'"
+          '')
+          ''
+            ACTION=="add|change", SUBSYSTEM=="block", ENV{DEVTYPE}=="disk", ATTR{removable}=="1", ATTR{bdi/strict_limit}="1", ATTR{bdi/max_bytes}="268435456"
+            ACTION=="add|change", SUBSYSTEM=="block", ENV{DEVTYPE}=="disk", KERNEL=="sd[a-z]*", ATTR{queue/rotational}=="1", ATTR{bdi/strict_limit}="1", ATTR{bdi/max_bytes}="268435456"
+            ACTION=="add|change", SUBSYSTEM=="block", ENV{DEVTYPE}=="disk", KERNEL=="mmcblk[0-9]*", ATTR{bdi/strict_limit}="1", ATTR{bdi/max_bytes}="268435456"
+            ACTION=="add|change", SUBSYSTEM=="block", ENV{DEVTYPE}=="disk", ENV{ID_BUS}=="usb", ATTR{bdi/strict_limit}="1", ATTR{bdi/max_bytes}="16777216"
+          ''
+        ];
       })
 
       (lib.mkIf cfg.zram.enable {

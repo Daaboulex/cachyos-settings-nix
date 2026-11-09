@@ -94,7 +94,7 @@ Every option is a boolean that defaults to `false`. The last column names the up
 | Option | Description | Upstream files |
 |--------|-------------|----------------|
 | `cachyos.settings.enable` | Lets the areas below apply; changes nothing on its own | |
-| `sysctl.enable` | VM, kernel and network sysctls; swappiness 150 and zswap off once a zram device is up, whoever set zram up | `usr/lib/sysctl.d/70-cachyos-settings.conf`, `usr/lib/udev/rules.d/30-zram.rules` |
+| `sysctl.enable` | VM, kernel and network sysctls, with dirty memory as ratios of RAM; per-device writeback caps for removable, HDD, SD/eMMC (256M) and USB (16M) disks; swappiness 150 and zswap off once a zram device is up, whoever set zram up | `usr/lib/sysctl.d/70-cachyos-settings.conf`, `usr/lib/udev/rules.d/30-zram.rules`, `61-writeback-limits.rules` |
 | `zram.enable` | zram swap: zstd, up to 100% of RAM, priority 100 | `usr/lib/systemd/zram-generator.conf` |
 | `ioSchedulers.enable` | bfq for rotational disks, mq-deadline for SSD and eMMC, kyber for NVMe | `usr/lib/udev/rules.d/60-ioschedulers.rules` |
 | `audio.enable` | PCI latency timers (80 cycles for sound cards, 20 for the rest), snd-hda-intel power saving off on AC, HPET/RTC and CPU DMA latency for the audio group, rtprio and nice limits, rtkit logging capped at info | `usr/lib/udev/rules.d/20-audio-pm.rules` with its `audio-pm-ctl` helper, `40-hpet-permissions.rules`, `99-cpu-dma-latency.rules`, `usr/lib/systemd/system/pci-latency.service`, `system/rtkit-daemon.service.d/override.conf`, `etc/security/limits.d/20-audio.conf` |
