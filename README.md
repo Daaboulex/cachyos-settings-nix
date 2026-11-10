@@ -129,7 +129,7 @@ Left to NixOS, which already has the switch (re-check at each re-mirror):
 Deliberately not ported, because they do nothing useful on NixOS (re-check this list at each re-mirror):
 
 - `usr/bin` user tools (`game-performance`, `cachyos-bugreport.sh`, `dlss-swapper`, `dlss-swapper-dll`, `kerver`, `paste-cachyos`, `sbctl-batch-sign`, `topmem`, `zink-run`): launchers and tools built around pacman and CachyOS's paste service; `pci-latency` is the exception, ported as a systemd service.
-- `usr/bin/eac-status`: checks the system for Easy Anti-Cheat Linux v2, which needs a boot signed only by CachyOS's EAC certificate and the `linux-cachyos-eac` kernel. A NixOS boot has neither.
+- `usr/bin/eac-status` and `usr/bin/eac-setup`: they check and set up a system for Easy Anti-Cheat Linux v2, which needs a boot signed only by CachyOS's EAC certificate and the `linux-cachyos-eac` kernel, enrolled through sbctl and systemd-boot's CachyOS-signed loader. A NixOS boot has neither.
 - Wireless regdomain automation (`usr/lib/iw-set-regdomain`, `85-iw-regulatory.rules`, `cachyos-iw-set-regdomain.{path,service}`): set the regulatory domain declaratively instead.
 - The xswap generator and its `systemd-zram-setup@.service` drop-in: they act only on a kernel exposing `/sys/kernel/mm/xswap`, a patch series neither mainline nor the CachyOS 7.3 kernel carries.
 - `fs.file-max = 2097152` from the sysctl file: systemd already raises the limit to its maximum at boot, so upstream's value lowers it.
