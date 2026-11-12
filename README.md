@@ -26,7 +26,7 @@ A module-only Nix flake providing CachyOS-Settings as a standalone NixOS module:
 - **Module-only repo** — no packages output; imports as `nixosModules.default`
 - **Daily upstream tracking** — a GitHub Action checks `CachyOS-Settings` master daily and files a `remirror-needed` issue when upstream moves (this module is a hand-port; it never auto-edits)
 - **Opt-in areas** — every area (`sysctl`, `zram`, `ioSchedulers`, `audio`, `storage`, `thp`, `ntsync`, `coredump`, `serviceManager`, `journal`, `oomd`, `watchdogBlacklist`, `nvidia`) is off until set; `enable` alone changes nothing
-- **Module-instantiation check** — CI instantiates the module (enabled) via `nix flake check`, so activation-time errors surface, not just evaluation
+- **Module-instantiation check.** The `module-eval` check instantiates a full NixOS system with every area on, so evaluation and assertion errors of the full system surface. It activates nothing.
 
 Provides sysctl tuning, udev rules, systemd tweaks, ZRAM, THP, I/O schedulers, audio optimizations, and more — matching upstream CachyOS defaults.
 
@@ -85,32 +85,32 @@ cachyos.settings = {
 };
 ```
 
-Every single-valued setting the module lands is a `lib.mkOverride 500`, the priority nixpkgs' own installer profiles and editor modules use: it beats the `mkDefault` values NixOS itself sets (`kernel.kptr_restrict`, `kernel.printk`), and a host overrides it with a plain line, while two modules that set the same value at the same priority fail evaluation as a conflict instead of one silently winning. The udev rules, modprobe lines, kernel module lists, tmpfiles rules and PAM limits stay at the default priority and merge with the host's own, as the module system does for lists and lines; a lower priority there would drop the module's whole contribution the moment any other module adds to the same option, so those are switched off with their area, never overridden.
+Except for the three named next, every single-valued setting the module lands is a `lib.mkOverride 500`, the priority nixpkgs' own installer profiles and editor modules use: it beats the `mkDefault` values NixOS itself sets (`kernel.kptr_restrict`, `kernel.printk`), and a host overrides it with a plain line, while two modules that set the same value at the same priority fail evaluation as a conflict instead of one silently winning. The exceptions sit at the default priority: `zramSwap.enable`, the `overrideStrategy = "asDropin"` of the four systemd units the module adds a drop-in to (`rtkit-daemon`, `user@`, `system.slice` and the user manager's `session.slice`), and the `pci-latency` service, which the module defines itself. The udev rules, modprobe lines, kernel module lists, tmpfiles rules and PAM limits stay at the default priority and merge with the host's own, as the module system does for lists and lines; a lower priority there would drop the module's whole contribution the moment any other module adds to the same option, so those are switched off with their area, never overridden.
 
 ## Options
 
-Every option is a boolean that defaults to `false`. The last column names the upstream files each area ports, as paths in the CachyOS-Settings tree at the commit `upstream-version.json` pins.
+Every option is a boolean under `cachyos.settings` that defaults to `false`, and [module.nix](./module.nix) declares each one with its description. The table names the upstream files each area ports, as paths in the CachyOS-Settings tree at the commit [upstream-version.json](./upstream-version.json) pins.
 
-| Option | Description | Upstream files |
-|--------|-------------|----------------|
-| `cachyos.settings.enable` | Lets the areas below apply; changes nothing on its own | |
-| `sysctl.enable` | VM, kernel and network sysctls, with dirty memory as ratios of RAM; per-device writeback caps for removable, HDD, SD/eMMC (256M) and USB (16M) disks; swappiness 150 and zswap off once a zram device is up, whoever set zram up | `usr/lib/sysctl.d/70-cachyos-settings.conf`, `usr/lib/udev/rules.d/30-zram.rules`, `61-writeback-limits.rules` |
-| `zram.enable` | zram swap: zstd, up to 100% of RAM, priority 100 | `usr/lib/systemd/zram-generator.conf` |
-| `ioSchedulers.enable` | bfq for rotational disks, mq-deadline for SSD and eMMC, kyber for NVMe | `usr/lib/udev/rules.d/60-ioschedulers.rules` |
-| `audio.enable` | PCI latency timers (80 cycles for sound cards, 20 for the rest), snd-hda-intel power saving off on AC, HPET/RTC and CPU DMA latency for the audio group, rtprio and nice limits, rtkit logging capped at info | `usr/lib/udev/rules.d/20-audio-pm.rules` with its `audio-pm-ctl` helper, `40-hpet-permissions.rules`, `99-cpu-dma-latency.rules`, `usr/lib/systemd/system/pci-latency.service`, `system/rtkit-daemon.service.d/override.conf`, `etc/security/limits.d/20-audio.conf` |
-| `storage.enable` | SATA ALPM at max_performance, hdparm for rotational disks | `usr/lib/udev/rules.d/50-sata.rules`, `69-hdparm.rules` |
-| `thp.enable` | THP defrag at defer+madvise, khugepaged shrinker | `usr/lib/tmpfiles.d/thp.conf`, `thp-shrinker.conf` |
-| `ntsync.enable` | ntsync module for Wine and Proton | `usr/lib/modules-load.d/ntsync.conf` |
-| `coredump.enable` | Core dumps removed after three days | `usr/lib/tmpfiles.d/coredump.conf` |
-| `serviceManager.enable` | Start and stop timeouts and open-file limits for the system and user managers, cgroup delegation to user managers | `usr/lib/systemd/system.conf.d/00-timeout.conf`, `10-limits.conf`, `user.conf.d/00-timeout.conf`, `10-limits.conf`, `system/user@.service.d/delegate.conf` |
-| `journal.enable` | System journal capped at 50M | `usr/lib/systemd/journald.conf.d/00-journal-size.conf` |
-| `oomd.enable` | systemd-oomd slice policy; acts only while systemd-oomd runs, which NixOS does by default | `usr/lib/systemd/system/system.slice.d/10-oomd-per-slice-defaults.conf`, `user/slice.d/10-oomd-per-slice-defaults.conf`, `user/session.slice.d/10-ignore-session-slice.conf` |
-| `watchdogBlacklist.enable` | Blacklist the iTCO, SP5100 and WDAT hardware watchdog drivers | `usr/lib/modprobe.d/blacklist.conf` |
-| `nvidia.enable` | Runtime power management on bind, and `NVreg_InitializeSystemMemoryAllocations=0`, which skips zeroing freshly allocated system memory for speed | `usr/lib/udev/rules.d/71-nvidia.rules`, `usr/lib/modprobe.d/nvidia.conf` |
+| Option | Upstream files |
+|--------|----------------|
+| `enable` | |
+| `sysctl.enable` | `usr/lib/sysctl.d/70-cachyos-settings.conf`, `usr/lib/udev/rules.d/30-zram.rules`, `61-writeback-limits.rules` |
+| `zram.enable` | `usr/lib/systemd/zram-generator.conf` |
+| `ioSchedulers.enable` | `usr/lib/udev/rules.d/60-ioschedulers.rules` |
+| `audio.enable` | `usr/lib/udev/rules.d/20-audio-pm.rules` with its `audio-pm-ctl` helper, `40-hpet-permissions.rules`, `99-cpu-dma-latency.rules`, `usr/lib/systemd/system/pci-latency.service`, `system/rtkit-daemon.service.d/override.conf`, `etc/security/limits.d/20-audio.conf` |
+| `storage.enable` | `usr/lib/udev/rules.d/50-sata.rules`, `69-hdparm.rules` |
+| `thp.enable` | `usr/lib/tmpfiles.d/thp.conf`, `thp-shrinker.conf` |
+| `ntsync.enable` | `usr/lib/modules-load.d/ntsync.conf` |
+| `coredump.enable` | `usr/lib/tmpfiles.d/coredump.conf` |
+| `serviceManager.enable` | `usr/lib/systemd/system.conf.d/00-timeout.conf`, `10-limits.conf`, `user.conf.d/00-timeout.conf`, `10-limits.conf`, `system/user@.service.d/delegate.conf` |
+| `journal.enable` | `usr/lib/systemd/journald.conf.d/00-journal-size.conf` |
+| `oomd.enable` | `usr/lib/systemd/system/system.slice.d/10-oomd-per-slice-defaults.conf`, `user/slice.d/10-oomd-per-slice-defaults.conf`, `user/session.slice.d/10-ignore-session-slice.conf` |
+| `watchdogBlacklist.enable` | `usr/lib/modprobe.d/blacklist.conf` |
+| `nvidia.enable` | `usr/lib/udev/rules.d/71-nvidia.rules`, `usr/lib/modprobe.d/nvidia.conf` |
 
 ## Upstream Tracking
 
-The last-mirrored upstream commit is recorded in `upstream-version.json`. A daily GitHub Action checks [CachyOS-Settings](https://github.com/CachyOS/CachyOS-Settings) master; because this module is a hand-port, it files one `remirror-needed` issue when upstream moves and keeps it open, with the days since it opened, until the marker is advanced.
+The last-mirrored upstream commit is recorded in [upstream-version.json](./upstream-version.json). A daily GitHub Action checks [CachyOS-Settings](https://github.com/CachyOS/CachyOS-Settings) master; because this module is a hand-port, it files one `remirror-needed` issue when upstream moves and keeps it open, with the days since it opened, until the marker is advanced.
 
 Every value is upstream's, landed through the NixOS option that owns the file. It differs from upstream only here (re-check this list at each re-mirror):
 
@@ -145,10 +145,12 @@ git clone https://github.com/Daaboulex/cachyos-settings-nix
 cd cachyos-settings-nix
 nix develop                       # enter dev shell, installs pre-commit hooks
 nix fmt                           # format flake + module
-nix flake check --no-build        # eval check (canonical CI gate, module-only repo)
+nix flake check --no-eval-cache
 ```
 
-The daily `.github/workflows/update.yml` only DETECTS upstream movement (it opens a `remirror-needed` issue); re-porting the module is a manual step.
+`nix flake check --no-eval-cache` is the gate. It builds every check of the flake, among them `module-eval` and `oomd-user-dropins`.
+
+The daily [.github/workflows/update.yml](./.github/workflows/update.yml) only DETECTS upstream movement (it opens a `remirror-needed` issue); re-porting the module is a manual step.
 
 <!-- BEGIN generated:options -->
 <!-- END generated:options -->

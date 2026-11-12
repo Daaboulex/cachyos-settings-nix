@@ -2,7 +2,7 @@
 
 ## Supported Versions
 
-This repository tracks upstream releases. The latest commit on the default branch is the only supported version.
+This repository tracks upstream commits on the `master` branch. The latest commit on the default branch is the only supported version.
 
 ## Reporting a Vulnerability
 
@@ -22,7 +22,7 @@ Please do **not** open public issues for security problems.
 
 ## Scope
 
-This repository is a Nix packaging wrapper. Security issues within the upstream software itself should be reported to the upstream project. This repo's security scope covers:
+This repository is a hand-ported NixOS module. Security issues within the upstream software itself should be reported to the upstream project. This repo's security scope covers:
 
 - Build-time supply-chain issues (unpinned inputs, missing hash verification)
 - Misconfigured CI secrets or tokens
