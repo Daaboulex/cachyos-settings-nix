@@ -26,7 +26,12 @@
       imports = [ inputs.std.flakeModules.base ];
 
       perSystem =
-        { pkgs, system, ... }:
+        {
+          lib,
+          pkgs,
+          system,
+          ...
+        }:
         let
           everyArea.cachyos.settings = {
             enable = true;
@@ -58,6 +63,51 @@
             }).config.environment.etc;
           userUnits = etc."systemd/user".source;
           userGenerators = etc."systemd/user-generators".source;
+
+          ledger = lib.importJSON ./upstream-version.json;
+          decided =
+            decision: lib.attrsToList (lib.filterAttrs (_: entry: entry.decision == decision) ledger.files);
+          knownArea =
+            area:
+            lib.hasSuffix ".enable" area && everyArea.cachyos.settings ? ${lib.removeSuffix ".enable" area};
+          table =
+            heading: column: decision: cell:
+            lib.concatStringsSep "\n" (
+              [
+                "## ${heading}"
+                ""
+                "| Upstream file | ${column} |"
+                "|---|---|"
+              ]
+              ++ map (file: "| `${file.name}` | ${cell file.value} |") (decided decision)
+            );
+          strayDecisions = lib.attrNames (
+            lib.filterAttrs (
+              _: entry:
+              !lib.elem entry.decision [
+                "ported"
+                "left-to-nixos"
+                "not-ported"
+              ]
+            ) ledger.files
+          );
+          strayAreas = map (file: "${file.name} names ${file.value.area or "no area"}") (
+            lib.filter (file: !knownArea (file.value.area or "")) (decided "ported")
+          );
+          upstreamPage =
+            if strayDecisions != [ ] then
+              throw "upstream-version.json: these files carry a decision that is none of ported, left-to-nixos, not-ported: ${toString strayDecisions}"
+            else if strayAreas != [ ] then
+              throw "upstream-version.json: a ported file must name the option that carries it, as <area>.enable: ${lib.concatStringsSep "; " strayAreas}"
+            else
+              lib.concatStringsSep "\n\n" [
+                "# What comes from upstream"
+                "Every file of [${ledger.repo}](https://github.com/${ledger.repo}) and what this module does with it, at the commit [upstream-version.json](../upstream-version.json) records. This page is generated from that file: change a decision there, then run `nix run .#write-upstream-page`."
+                (table "Ported" "Option under `cachyos.settings`" "ported" (entry: "`${entry.area}`"))
+                (table "Left to NixOS" "Why" "left-to-nixos" (entry: entry.why))
+                (table "Not ported" "Why" "not-ported" (entry: entry.why))
+              ]
+              + "\n";
         in
         {
           checks.module-eval = inputs.std.lib.nixosModuleCheck {
@@ -66,6 +116,41 @@
             module = ./module.nix;
             config = everyArea;
           };
+
+          apps.write-upstream-page = {
+            type = "app";
+            program = lib.getExe (
+              pkgs.writeShellApplication {
+                name = "write-upstream-page";
+                runtimeInputs = [
+                  pkgs.coreutils
+                  pkgs.git
+                ];
+                text = ''
+                  install -Dm644 ${pkgs.writeText "UPSTREAM.md" upstreamPage} "$(git rev-parse --show-toplevel)/docs/UPSTREAM.md"
+                '';
+              }
+            );
+            meta.description = "Write docs/UPSTREAM.md from the file ledger in upstream-version.json";
+          };
+
+          checks.upstream-page-current =
+            pkgs.runCommand "upstream-page-current"
+              {
+                rendered = upstreamPage;
+                committed = builtins.readFile ./docs/UPSTREAM.md;
+                passAsFile = [
+                  "rendered"
+                  "committed"
+                ];
+              }
+              ''
+                if ! diff -u "$committedPath" "$renderedPath"; then
+                  echo "docs/UPSTREAM.md is not what upstream-version.json says; rewrite it with: nix run .#write-upstream-page"
+                  exit 1
+                fi
+                touch "$out"
+              '';
 
           checks.oomd-user-dropins = pkgs.runCommand "oomd-user-dropins" { } ''
             generator=${userGenerators}/cachyos-oomd-generator

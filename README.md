@@ -89,54 +89,17 @@ Except for the three named next, every single-valued setting the module lands is
 
 ## Options
 
-Every option is a boolean under `cachyos.settings` that defaults to `false`, and [module.nix](./module.nix) declares each one with its description. The table names the upstream files each area ports, as paths in the CachyOS-Settings tree at the commit [upstream-version.json](./upstream-version.json) pins.
-
-| Option | Upstream files |
-|--------|----------------|
-| `enable` | |
-| `sysctl.enable` | `usr/lib/sysctl.d/70-cachyos-settings.conf`, `usr/lib/udev/rules.d/30-zram.rules`, `61-writeback-limits.rules` |
-| `zram.enable` | `usr/lib/systemd/zram-generator.conf` |
-| `ioSchedulers.enable` | `usr/lib/udev/rules.d/60-ioschedulers.rules` |
-| `audio.enable` | `usr/lib/udev/rules.d/20-audio-pm.rules` with its `audio-pm-ctl` helper, `40-hpet-permissions.rules`, `99-cpu-dma-latency.rules`, `usr/lib/systemd/system/pci-latency.service`, `system/rtkit-daemon.service.d/override.conf`, `etc/security/limits.d/20-audio.conf` |
-| `storage.enable` | `usr/lib/udev/rules.d/50-sata.rules`, `69-hdparm.rules` |
-| `thp.enable` | `usr/lib/tmpfiles.d/thp.conf`, `thp-shrinker.conf` |
-| `ntsync.enable` | `usr/lib/modules-load.d/ntsync.conf` |
-| `coredump.enable` | `usr/lib/tmpfiles.d/coredump.conf` |
-| `serviceManager.enable` | `usr/lib/systemd/system.conf.d/00-timeout.conf`, `10-limits.conf`, `user.conf.d/00-timeout.conf`, `10-limits.conf`, `system/user@.service.d/delegate.conf` |
-| `journal.enable` | `usr/lib/systemd/journald.conf.d/00-journal-size.conf` |
-| `oomd.enable` | `usr/lib/systemd/system/system.slice.d/10-oomd-per-slice-defaults.conf`, `user-generators/cachyos-oomd-generator`, `user/session.slice.d/10-ignore-session-slice.conf` |
-| `watchdogBlacklist.enable` | `usr/lib/modprobe.d/blacklist.conf` |
-| `nvidia.enable` | `usr/lib/udev/rules.d/71-nvidia.rules`, `usr/lib/modprobe.d/nvidia.conf` |
+Every option is a boolean under `cachyos.settings` that defaults to `false`, and [module.nix](./module.nix) declares each one with its description. Which upstream file each area ports, and which files are left to NixOS or not ported at all, is in [docs/UPSTREAM.md](docs/UPSTREAM.md).
 
 ## Upstream Tracking
 
 The last-mirrored upstream commit is recorded in [upstream-version.json](./upstream-version.json). A daily GitHub Action checks [CachyOS-Settings](https://github.com/CachyOS/CachyOS-Settings) master; because this module is a hand-port, it files one `remirror-needed` issue when upstream moves and keeps it open, with the days since it opened, until the marker is advanced.
 
-Every value is upstream's, landed through the NixOS option that owns the file. It differs from upstream only here (re-check this list at each re-mirror):
+Every value is upstream's, landed through the NixOS option that owns the file. It differs from upstream only here:
 
 - The watchdog blacklist is an area of its own; upstream always blacklists the drivers.
 - SATA link power: `powerManagement.scsiLinkPolicy` writes `max_performance` to every `scsi_host` without upstream's `link_power_management_supported=="1"` guard. NixOS refuses it next to `services.tlp`, so a TLP host sets `powerManagement.scsiLinkPolicy = null` (keeping the hdparm rule) or `storage.enable = false`.
 - The oomd generator is the upstream script with `coreutils` pinned from the store and without the comment line it writes into the drop-in.
-
-Left to NixOS, which already has the switch (re-check at each re-mirror):
-
-- `usr/lib/NetworkManager/conf.d/dns.conf`: NixOS points NetworkManager at systemd-resolved whenever `services.resolved.enable` is on.
-- `usr/lib/modprobe.d/amdgpu.conf`: `hardware.amdgpu.legacySupport.enable` sets the same four parameters.
-- `usr/lib/systemd/timesyncd.conf.d/10-timesyncd.conf`: NixOS runs timesyncd by default with its own pool; upstream's fallback servers are Arch's vendor zone, which belongs to Arch. Set `services.timesyncd.servers` for Cloudflare.
-- The upstream package enabling `systemd-oomd`: NixOS enables it by default.
-- `ananicy-cpp` with the CachyOS rules, which the upstream package depends on: `services.ananicy` with `rulesProvider = pkgs.ananicy-rules-cachyos`.
-
-Deliberately not ported, because they do nothing useful on NixOS (re-check this list at each re-mirror):
-
-- `usr/bin` user tools (`game-performance`, `cachyos-bugreport.sh`, `dlss-swapper`, `dlss-swapper-dll`, `kerver`, `paste-cachyos`, `sbctl-batch-sign`, `topmem`, `zink-run`): launchers and tools built around pacman and CachyOS's paste service; `pci-latency` is the exception, ported as a systemd service.
-- `usr/bin/eac-status` and `usr/bin/eac-setup`: they check and set up a system for Easy Anti-Cheat Linux v2, which needs a boot signed only by CachyOS's EAC certificate and the `linux-cachyos-eac` kernel, enrolled through sbctl and systemd-boot's CachyOS-signed loader. A NixOS boot has neither.
-- Wireless regdomain automation (`usr/lib/iw-set-regdomain`, `85-iw-regulatory.rules`, `cachyos-iw-set-regdomain.{path,service}`): set the regulatory domain declaratively instead.
-- The xswap generator and its `systemd-zram-setup@.service` drop-in: they act only on a kernel exposing `/sys/kernel/mm/xswap`, a patch series neither mainline nor the CachyOS 7.3 kernel carries.
-- `fs.file-max = 2097152` from the sysctl file: systemd already raises the limit to its maximum at boot, so upstream's value lowers it.
-- `kernel.unprivileged_userns_clone = 1` from the sysctl file: the key exists only on patched kernels, where 1 is already the default (CachyOS 7.3 `kernel/fork.c:135`).
-- GNOME/GDM branding (`usr/share/glib-2.0/.../login-screen` override, `usr/share/icons/cachyos.svg`).
-- X11 touchpad defaults (`usr/share/X11/xorg.conf.d/20-touchpad.conf`): NixOS's libinput already enables tap-to-click.
-- The debuginfod server URL (`etc/debuginfod/cachyos.urls`): the server indexes CachyOS and Arch build ids; a binary built by Nix never matches, so every lookup would only wait for a 404.
 
 ## Development
 
