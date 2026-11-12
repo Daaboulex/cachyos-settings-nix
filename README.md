@@ -104,7 +104,7 @@ Every option is a boolean under `cachyos.settings` that defaults to `false`, and
 | `coredump.enable` | `usr/lib/tmpfiles.d/coredump.conf` |
 | `serviceManager.enable` | `usr/lib/systemd/system.conf.d/00-timeout.conf`, `10-limits.conf`, `user.conf.d/00-timeout.conf`, `10-limits.conf`, `system/user@.service.d/delegate.conf` |
 | `journal.enable` | `usr/lib/systemd/journald.conf.d/00-journal-size.conf` |
-| `oomd.enable` | `usr/lib/systemd/system/system.slice.d/10-oomd-per-slice-defaults.conf`, `user/slice.d/10-oomd-per-slice-defaults.conf`, `user/session.slice.d/10-ignore-session-slice.conf` |
+| `oomd.enable` | `usr/lib/systemd/system/system.slice.d/10-oomd-per-slice-defaults.conf`, `user-generators/cachyos-oomd-generator`, `user/session.slice.d/10-ignore-session-slice.conf` |
 | `watchdogBlacklist.enable` | `usr/lib/modprobe.d/blacklist.conf` |
 | `nvidia.enable` | `usr/lib/udev/rules.d/71-nvidia.rules`, `usr/lib/modprobe.d/nvidia.conf` |
 
@@ -116,7 +116,7 @@ Every value is upstream's, landed through the NixOS option that owns the file. I
 
 - The watchdog blacklist is an area of its own; upstream always blacklists the drivers.
 - SATA link power: `powerManagement.scsiLinkPolicy` writes `max_performance` to every `scsi_host` without upstream's `link_power_management_supported=="1"` guard. NixOS refuses it next to `services.tlp`, so a TLP host sets `powerManagement.scsiLinkPolicy = null` (keeping the hdparm rule) or `storage.enable = false`.
-- The user manager's `slice.d` drop-in is shipped as the upstream file through `systemd.packages`, because NixOS has no option for a drop-in that applies to every slice.
+- The oomd generator is the upstream script with `coreutils` pinned from the store and without the comment line it writes into the drop-in.
 
 Left to NixOS, which already has the switch (re-check at each re-mirror):
 

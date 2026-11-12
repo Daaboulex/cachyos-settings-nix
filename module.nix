@@ -18,6 +18,26 @@ let
     ${pkgs.pciutils}/bin/setpci -v -d '*:*:04xx' latency_timer=80
   '';
 
+  oomdGenerator = pkgs.writeShellApplication {
+    name = "cachyos-oomd-generator";
+    runtimeInputs = [ pkgs.coreutils ];
+    inheritPath = false;
+    text = ''
+      [[ -n "''${1:-}" ]] || exit 1
+      if ! cat /proc/1/cgroup >/dev/null 2>&1; then
+        exit 0
+      fi
+
+      mkdir -p "$1/slice.d"
+      cat >"$1/slice.d/10-oomd-per-slice-defaults.conf" <<CONF
+      [Slice]
+      ManagedOOMSwap=kill
+      ManagedOOMMemoryPressure=kill
+      ManagedOOMMemoryPressureLimit=80%
+      CONF
+    '';
+  };
+
   audioPmCtl = pkgs.writeShellApplication {
     name = "audio-pm-ctl";
     runtimeInputs = [
@@ -94,9 +114,9 @@ in
     thp.enable = lib.mkEnableOption "THP defrag at defer+madvise and the khugepaged shrinker threshold";
     ntsync.enable = lib.mkEnableOption "the ntsync kernel module, which Wine and Proton use for NT synchronization";
     coredump.enable = lib.mkEnableOption "removal of core dumps older than three days";
-    serviceManager.enable = lib.mkEnableOption "systemd's start and stop timeouts and open-file limits for the system and user managers, and cgroup delegation to user managers";
+    serviceManager.enable = lib.mkEnableOption "systemd's stop timeout and open-file limits for the system and user managers, and cgroup delegation to user managers";
     journal.enable = lib.mkEnableOption "a 50M cap on the system journal";
-    oomd.enable = lib.mkEnableOption "systemd-oomd slice policy: kill on swap for system.slice, kill on swap and at 80% memory pressure for every slice of a user manager, session.slice left alone; it acts only while systemd-oomd runs";
+    oomd.enable = lib.mkEnableOption "systemd-oomd slice policy: kill on swap for system.slice, kill on swap and at 80% memory pressure for every slice of a user manager that can see PID 1, session.slice left alone; it acts only while systemd-oomd runs";
     watchdogBlacklist.enable = lib.mkEnableOption "the blacklist of the iTCO, SP5100 and WDAT hardware watchdog drivers";
     nvidia.enable = lib.mkEnableOption "NVIDIA runtime power management on bind, and NVreg_InitializeSystemMemoryAllocations=0, which skips zeroing freshly allocated system memory for speed";
   };
@@ -222,13 +242,11 @@ in
 
       (lib.mkIf cfg.serviceManager.enable {
         systemd.settings.Manager = lib.mapAttrs (_: upstreamDefault) {
-          DefaultTimeoutStartSec = "15s";
           DefaultTimeoutStopSec = "10s";
           DefaultLimitNOFILE = "2048:2097152";
         };
 
         systemd.user.settings.Manager = lib.mapAttrs (_: upstreamDefault) {
-          DefaultTimeoutStartSec = "15s";
           DefaultTimeoutStopSec = "10s";
           DefaultLimitNOFILE = "1024:1048576";
         };
@@ -250,14 +268,7 @@ in
           sliceConfig.ManagedOOMSwap = upstreamDefault "kill";
         };
 
-        systemd.packages = [
-          (pkgs.writeTextDir "lib/systemd/user/slice.d/10-oomd-per-slice-defaults.conf" ''
-            [Slice]
-            ManagedOOMSwap=kill
-            ManagedOOMMemoryPressure=kill
-            ManagedOOMMemoryPressureLimit=80%
-          '')
-        ];
+        systemd.user.generators.cachyos-oomd-generator = lib.getExe oomdGenerator;
 
         systemd.user.slices.session = {
           overrideStrategy = "asDropin";

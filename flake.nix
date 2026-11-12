@@ -44,7 +44,7 @@
             watchdogBlacklist.enable = true;
             nvidia.enable = true;
           };
-          userUnits =
+          etc =
             (inputs.nixpkgs.lib.nixosSystem {
               inherit system;
               modules = [
@@ -55,7 +55,9 @@
                   system.stateVersion = inputs.nixpkgs.lib.trivial.release;
                 }
               ];
-            }).config.environment.etc."systemd/user".source;
+            }).config.environment.etc;
+          userUnits = etc."systemd/user".source;
+          userGenerators = etc."systemd/user-generators".source;
         in
         {
           checks.module-eval = inputs.std.lib.nixosModuleCheck {
@@ -66,8 +68,20 @@
           };
 
           checks.oomd-user-dropins = pkgs.runCommand "oomd-user-dropins" { } ''
-            if ! grep -qx 'ManagedOOMMemoryPressureLimit=80%' ${userUnits}/slice.d/10-oomd-per-slice-defaults.conf; then
-              echo "the per-slice oomd defaults are not in the user manager's slice.d"
+            generator=${userGenerators}/cachyos-oomd-generator
+            if [ ! -x "$generator" ]; then
+              echo "the oomd generator is not among the user manager's generators"
+              exit 1
+            fi
+            "$generator" "$PWD/generated"
+            if ! grep -qx 'ManagedOOMMemoryPressureLimit=80%' generated/slice.d/10-oomd-per-slice-defaults.conf; then
+              echo "the oomd generator did not write the per-slice defaults into the directory it was given"
+              exit 1
+            fi
+            status=0
+            "$generator" || status=$?
+            if [ "$status" != 1 ]; then
+              echo "the oomd generator exited $status, not 1, when given no directory to write to"
               exit 1
             fi
             if ! grep -qx 'ManagedOOMPreference=omit' ${userUnits}/session.slice.d/overrides.conf; then
